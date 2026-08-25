@@ -14,7 +14,7 @@
 <body>
   <canvas id="game"></canvas>
   <div id="loading">
-    <span id="message">Loading game files&hellip;</span>
+    <span id="message">Loading game files…</span>
     <progress id="progress" value="0" max="1"></progress>
   </div>
 
@@ -24,6 +24,7 @@
     const loading = document.getElementById('loading');
     const message = document.getElementById('message');
     const progress = document.getElementById('progress');
+    const assetBase = new URL('build/', document.baseURI).href;
 
     function partUrls(prefix, count) {
       return Array.from({ length: count }, (_, index) =>
@@ -34,7 +35,7 @@
     async function joinParts(urls, type, label) {
       const blobs = [];
       for (let index = 0; index < urls.length; index += 1) {
-        message.textContent = `Loading ${label} ${index + 1} of ${urls.length}&hellip;`;
+        message.textContent = `Loading ${label} ${index + 1} of ${urls.length}…`;
         const response = await fetch(urls[index]);
         if (!response.ok) throw new Error(`Could not load ${urls[index]} (${response.status})`);
         blobs.push(await response.blob());
@@ -46,12 +47,12 @@
       joinParts(partUrls('hk.data', 42), 'application/octet-stream', 'game data'),
       joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime')
     ]).then(([dataUrl, codeUrl]) => {
-      message.textContent = 'Starting game&hellip;';
+      message.textContent = 'Starting game…';
       return createUnityInstance(canvas, {
         dataUrl,
-        frameworkUrl: 'build/hk.framework.js',
+        frameworkUrl: assetBase + 'hk.framework.js',
         codeUrl,
-        streamingAssetsUrl: 'StreamingAssets'
+        streamingAssetsUrl: new URL('StreamingAssets/', document.baseURI).href
       }, value => { progress.value = value; });
     }).then(() => {
       loading.remove();
