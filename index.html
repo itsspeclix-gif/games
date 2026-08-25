@@ -18,18 +18,28 @@
     <progress id="progress" value="0" max="1"></progress>
   </div>
 
-  <script src="build/hk.loader.js"></script>
   <script>
     const canvas = document.getElementById('game');
     const loading = document.getElementById('loading');
     const message = document.getElementById('message');
     const progress = document.getElementById('progress');
-    const assetBase = new URL('build/', document.baseURI).href;
+    const gameBase = 'https://cdn.jsdelivr.net/gh/itsspeclix-gif/games@main/';
+    const assetBase = gameBase + 'build/';
 
     function partUrls(prefix, count) {
       return Array.from({ length: count }, (_, index) =>
-        `build/${prefix}.part${index + 1}`
+        `${assetBase}${prefix}.part${index + 1}`
       );
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Could not load ${url}`));
+        document.head.appendChild(script);
+      });
     }
 
     async function joinParts(urls, type, label) {
@@ -44,15 +54,16 @@
     }
 
     Promise.all([
+      loadScript(assetBase + 'hk.loader.js'),
       joinParts(partUrls('hk.data', 42), 'application/octet-stream', 'game data'),
       joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime')
-    ]).then(([dataUrl, codeUrl]) => {
+    ]).then(([, dataUrl, codeUrl]) => {
       message.textContent = 'Starting game…';
       return createUnityInstance(canvas, {
         dataUrl,
         frameworkUrl: assetBase + 'hk.framework.js',
         codeUrl,
-        streamingAssetsUrl: new URL('StreamingAssets/', document.baseURI).href
+        streamingAssetsUrl: gameBase + 'StreamingAssets/'
       }, value => { progress.value = value; });
     }).then(() => {
       loading.remove();
