@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hollow</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #101018; }
+    #game { width: 100%; height: 100%; display: block; }
+    #loading { position: fixed; inset: 0; display: grid; place-content: center; gap: 12px; color: #fff; font: 600 16px system-ui, sans-serif; text-align: center; }
+    progress { width: min(320px, 80vw); height: 12px; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="loading">
+    <span id="message">Loading game files&hellip;</span>
+    <progress id="progress" value="0" max="1"></progress>
+  </div>
+
+  <script src="build/hk.loader.js"></script>
+  <script>
+    const canvas = document.getElementById('game');
+    const loading = document.getElementById('loading');
+    const message = document.getElementById('message');
+    const progress = document.getElementById('progress');
+
+    function partUrls(prefix, count) {
+      return Array.from({ length: count }, (_, index) =>
+        `build/${prefix}.part${index + 1}`
+      );
+    }
+
+    async function joinParts(urls, type, label) {
+      const blobs = [];
+      for (let index = 0; index < urls.length; index += 1) {
+        message.textContent = `Loading ${label} ${index + 1} of ${urls.length}&hellip;`;
+        const response = await fetch(urls[index]);
+        if (!response.ok) throw new Error(`Could not load ${urls[index]} (${response.status})`);
+        blobs.push(await response.blob());
+      }
+      return URL.createObjectURL(new Blob(blobs, { type }));
+    }
+
+    Promise.all([
+      joinParts(partUrls('hk.data', 42), 'application/octet-stream', 'game data'),
+      joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime')
+    ]).then(([dataUrl, codeUrl]) => {
+      message.textContent = 'Starting game&hellip;';
+      return createUnityInstance(canvas, {
+        dataUrl,
+        frameworkUrl: 'build/hk.framework.js',
+        codeUrl,
+        streamingAssetsUrl: 'StreamingAssets'
+      }, value => { progress.value = value; });
+    }).then(() => {
+      loading.remove();
+    }).catch(error => {
+      console.error(error);
+      message.textContent = `Unable to start: ${error.message}`;
+    });
+  </script>
+</body>
+</html>
