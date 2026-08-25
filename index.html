@@ -54,7 +54,7 @@
     }
 
     Promise.all([
-      loadScript(assetBase + 'hk.loader.js'),
+      loadScript(assetBase + 'hk.loader.js?v=4'),
       joinParts(partUrls('hk.data', 42), 'application/octet-stream', 'game data'),
       joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime')
     ]).then(([, dataUrl, codeUrl]) => {
