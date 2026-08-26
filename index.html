@@ -68,6 +68,16 @@
     let dataUrl = null;
     let codeUrl = null;
 
+    function updateMultipartProgress(update) {
+      if (update.phase === 'archive') {
+        message.textContent = 'Loading game archive…';
+      } else if (update.phase === 'mounting') {
+        message.textContent = `Mounting game data: ${update.filesMounted} / ${update.totalFiles} files…`;
+      } else if (update.phase === 'complete') {
+        message.textContent = 'Starting game…';
+      }
+    }
+
     function revokeGameUrls() {
       if (dataUrl) {
         URL.revokeObjectURL(dataUrl);
@@ -81,14 +91,14 @@
 
     async function loadGameFiles() {
       if (isIOS) {
-        await loadScript(assetBase + 'hk.loader.js?v=4');
+        await loadScript(assetBase + 'hk.multipart-data.js?v=1');
+        await loadScript(assetBase + 'hk.loader.js?v=5');
         codeUrl = await joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime');
-        dataUrl = await joinParts(partUrls('hk.data', 42), 'application/octet-stream', 'game data');
         return;
       }
 
       const [loaderResult, dataResult, codeResult] = await Promise.all([
-        settle(loadScript(assetBase + 'hk.loader.js?v=4')),
+        settle(loadScript(assetBase + 'hk.loader.js?v=5')),
         settle(joinParts(partUrls('hk.data', 42), 'application/octet-stream', 'game data')),
         settle(joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime'))
       ]);
@@ -105,13 +115,20 @@
       try {
         await loadGameFiles();
         message.textContent = 'Starting game…';
-        await createUnityInstance(canvas, {
-          dataUrl,
+        const unityConfig = {
           frameworkUrl: assetBase + 'hk.framework.js',
           codeUrl,
           streamingAssetsUrl: gameBase + 'StreamingAssets/',
           devicePixelRatio: isIOS ? 1 : window.devicePixelRatio
-        }, value => { progress.value = value; });
+        };
+        if (isIOS) {
+          unityConfig.dataPartUrls = partUrls('hk.data', 42);
+          unityConfig.mountDataParts = (module, urls) =>
+            mountUnityDataParts(module, urls, { onProgress: updateMultipartProgress });
+        } else {
+          unityConfig.dataUrl = dataUrl;
+        }
+        await createUnityInstance(canvas, unityConfig, value => { progress.value = value; });
         revokeGameUrls();
         loading.remove();
       } catch (error) {
