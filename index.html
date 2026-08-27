@@ -14,7 +14,7 @@
 <body>
   <canvas id="game"></canvas>
   <div id="loading">
-    <span id="message">Loading game files…</span>
+    <span id="message">Loading runtime…</span>
     <progress id="progress" value="0" max="1"></progress>
   </div>
 
@@ -58,31 +58,17 @@
       return URL.createObjectURL(compositeBlob);
     }
 
-    function settle(promise) {
-      return promise.then(
-        value => ({ status: 'fulfilled', value }),
-        reason => ({ status: 'rejected', reason })
-      );
-    }
-
-    let dataUrl = null;
     let codeUrl = null;
 
-    function updateMultipartProgress(update) {
-      if (update.phase === 'archive') {
-        message.textContent = 'Loading game archive…';
-      } else if (update.phase === 'mounting') {
-        message.textContent = `Mounting game data: ${update.filesMounted} / ${update.totalFiles} files…`;
+    function updateMountProgress(update) {
+      if (update.phase === 'mounting') {
+        message.textContent = `Registering data: ${update.filesMounted} / ${update.totalFiles} files…`;
       } else if (update.phase === 'complete') {
         message.textContent = 'Starting game…';
       }
     }
 
     function revokeGameUrls() {
-      if (dataUrl) {
-        URL.revokeObjectURL(dataUrl);
-        dataUrl = null;
-      }
       if (codeUrl) {
         URL.revokeObjectURL(codeUrl);
         codeUrl = null;
@@ -90,25 +76,9 @@
     }
 
     async function loadGameFiles() {
-      if (isIOS) {
-        await loadScript(assetBase + 'hk.multipart-data.js?v=1');
-        await loadScript(assetBase + 'hk.loader.js?v=5');
-        codeUrl = await joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime');
-        return;
-      }
-
-      const [loaderResult, dataResult, codeResult] = await Promise.all([
-        settle(loadScript(assetBase + 'hk.loader.js?v=5')),
-        settle(joinParts(partUrls('hk.data', 42), 'application/octet-stream', 'game data')),
-        settle(joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime'))
-      ]);
-
-      if (dataResult.status === 'fulfilled') dataUrl = dataResult.value;
-      if (codeResult.status === 'fulfilled') codeUrl = codeResult.value;
-
-      const failedResult = [loaderResult, dataResult, codeResult]
-        .find(result => result.status === 'rejected');
-      if (failedResult) throw failedResult.reason;
+      await loadScript(assetBase + 'hk.stabilityfs.js?v=1');
+      await loadScript(assetBase + 'hk.loader.js?v=6');
+      codeUrl = await joinParts(partUrls('hk.wasm', 2), 'application/wasm', 'runtime');
     }
 
     async function startGame() {
@@ -119,22 +89,26 @@
           frameworkUrl: assetBase + 'hk.framework.js',
           codeUrl,
           streamingAssetsUrl: gameBase + 'StreamingAssets/',
-          devicePixelRatio: isIOS ? 1 : window.devicePixelRatio
+          devicePixelRatio: isIOS ? 0.80 : 1.00,
+          dataPartUrls: partUrls('hk.data', 42),
+          mountDataParts: (module, urls) =>
+            mountUnityDataParts(module, urls, { onProgress: updateMountProgress })
         };
-        if (isIOS) {
-          unityConfig.dataPartUrls = partUrls('hk.data', 42);
-          unityConfig.mountDataParts = (module, urls) =>
-            mountUnityDataParts(module, urls, { onProgress: updateMultipartProgress });
-        } else {
-          unityConfig.dataUrl = dataUrl;
-        }
-        await createUnityInstance(canvas, unityConfig, value => { progress.value = value; });
+        const instance = await createUnityInstance(
+          canvas,
+          unityConfig,
+          value => { progress.value = value; }
+        );
+        installHollowKnightPersistence(instance.Module);
+        installHollowKnightKeyboardBridge(canvas);
         revokeGameUrls();
         loading.remove();
       } catch (error) {
         revokeGameUrls();
         console.error(error);
-        message.textContent = `Unable to start: ${error.message}`;
+        message.textContent = 'Unable to start: ' + (
+          error && error.message ? error.message : String(error)
+        );
       }
     }
 
