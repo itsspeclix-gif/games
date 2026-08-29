@@ -1,138 +1,191 @@
-<html lang="en"><head>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width, user-scalable=no, initial-scale=1.0"
+  >
 
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
-    <title>Buckshot Roulette</title>
-    <link rel="stylesheet" href="style.css">
-    <link id="-gd-engine-icon" rel="icon" type="image/png" href="blob:https://gnhustgames.org/7e1ea45c-b81e-44c3-9510-2c573539714c">
-    <link rel="apple-touch-icon" href="buckshot-roulette.apple-touch-icon.png">
+  <title>Buckshot Roulette</title>
+
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="buckshot-roulette.icon.png">
+  <link rel="apple-touch-icon" href="buckshot-roulette.icon.png">
+
+  <style>
+    #loading-text {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      font-size: 18px;
+      z-index: 1000;
+    }
+  </style>
 </head>
 
 <body>
-    <script src="main.js"></script>
-    
-    <canvas id="canvas" tabindex="0" width="374" height="1513" style="position: absolute; top: 0px; left: 0px; width: 208px; height: 841px; cursor: url(&quot;blob:https://gnhustgames.org/b154ffae-37e7-4c47-bf54-f841f04bbb17&quot;) 12 0, default;"> Your browser does not support the canvas tag. </canvas>
-    <noscript> Your browser does not support JavaScript. </noscript>
-    
-    <script src="buckshot-roulette.js"></script>
-    <script>
-        const GODOT_CONFIG = {
-            "args": [],
-            "canvasResizePolicy": 2,
-            "ensureCrossOriginIsolationHeaders": false,
-            "executable": "buckshot-roulette",
-            "experimentalVK": false,
-            "fileSizes": {
-                "buckshot-roulette.pck": 344705792,
-                "buckshot-roulette.wasm": 43444261
-            },
-            "focusCanvas": false,
-            "gdextensionLibs": []
-        };
-        const GODOT_THREADS_ENABLED = false;
-        const engine = new Engine(GODOT_CONFIG);
 
-        function run() {
-            const loadingText = document.getElementById('loading-text');
-            const statusOverlay = document.getElementById('status');
-            const statusProgress = document.getElementById('status-progress');
-            const statusNotice = document.getElementById('status-notice');
-            loadingText.remove();
-            let initializing = true;
-            let statusMode = '';
+  <canvas id="canvas" tabindex="0">
+    Your browser does not support the canvas tag.
+  </canvas>
 
-            function setStatusMode(mode) {
-                if (statusMode === mode || !initializing) {
-                    return;
-                }
-                if (mode === 'hidden') {
-                    statusOverlay.remove();
-                    initializing = false;
-                    return;
-                }
-                statusOverlay.style.visibility = 'visible';
-                statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
-                statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
-                statusMode = mode;
-            }
+  <noscript>
+    Your browser does not support JavaScript.
+  </noscript>
 
-            function setStatusNotice(text) {
-                while (statusNotice.lastChild) {
-                    statusNotice.removeChild(statusNotice.lastChild);
-                }
-                const lines = text.split('\n');
-                lines.forEach((line) => {
-                    statusNotice.appendChild(document.createTextNode(line));
-                    statusNotice.appendChild(document.createElement('br'));
-                });
-            }
+  <div id="loading-text">
+    Loading Buckshot Roulette...
+  </div>
 
-            function displayFailureNotice(err) {
-                console.error(err);
-                if (err instanceof Error) {
-                    setStatusNotice(err.message);
-                } else if (typeof err === 'string') {
-                    setStatusNotice(err);
-                } else {
-                    setStatusNotice('An unknown error occurred.');
-                }
-                setStatusMode('notice');
-                initializing = false;
-            }
-            const missing = Engine.getMissingFeatures({
-                threads: GODOT_THREADS_ENABLED,
-            });
-            if (missing.length !== 0) {
-                if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-                    let serviceWorkerRegistrationPromise;
-                    try {
-                        serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-                    } catch (err) {
-                        serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-                    }
-                    // There's a chance that installing the service worker would fix the issue
-                    Promise.race([
-                        serviceWorkerRegistrationPromise.then((registration) => {
-                            if (registration != null) {
-                                return Promise.reject(new Error('Service worker already exists.'));
-                            }
-                            return registration;
-                        }).then(() => engine.installServiceWorker()),
-                        // For some reason, `getRegistration()` can stall
-                        new Promise((resolve) => {
-                            setTimeout(() => resolve(), 2000);
-                        }),
-                    ]).then(() => {
-                        // Reload if there was no error.
-                        window.location.reload();
-                    }).catch((err) => {
-                        console.error('Error while registering service worker:', err);
-                    });
-                } else {
-                    // Display the message as usual
-                    const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
-                    displayFailureNotice(missingMsg + missing.join('\n'));
-                }
-            } else {
-                setStatusMode('progress');
-                engine.startGame({
-                    'onProgress': function(current, total) {
-                        if (current > 0 && total > 0) {
-                            statusProgress.value = current;
-                            statusProgress.max = total;
-                        } else {
-                            statusProgress.removeAttribute('value');
-                            statusProgress.removeAttribute('max');
-                        }
-                    },
-                }).then(() => {
-                    setStatusMode('hidden');
-                }, displayFailureNotice);
-            }
-        };
-        window.godotRunStart = run;
-    </script>
-<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v3d52b47920f24c319d37e2661827c42b1787588026925" integrity="sha512-d9sL6GJLXn6fInD1+TVXhTcQOsmxeHfmHAvwGDIxp5TO+uo1fiWW7mHomMj4MLRlCsJDTqXzWLHJFFlPCEIj/A==" data-cf-beacon="{&quot;version&quot;:&quot;2024.11.0&quot;,&quot;token&quot;:&quot;466cade843754106bbf20c4f18f202b6&quot;,&quot;r&quot;:1}" crossorigin="anonymous"></script>
+  <div id="status">
+    <progress id="status-progress"></progress>
+    <div id="status-notice"></div>
+  </div>
 
+  <!-- Load the Godot runtime FIRST -->
+  <script src="buckshot-roulette.js"></script>
 
-<div class="ime" contenteditable="true" style="background: none; opacity: 0; position: fixed; text-align: left; font-size: 1px; left: 0px; top: 0px; width: 100%; height: 40px; pointer-events: none; display: none;"></div></body></html>
+  <!-- Define the Godot launch function BEFORE main.js starts downloading -->
+  <script>
+    const GODOT_CONFIG = {
+      args: [],
+      canvasResizePolicy: 2,
+      ensureCrossOriginIsolationHeaders: false,
+      executable: "buckshot-roulette",
+      experimentalVK: false,
+
+      fileSizes: {
+        "buckshot-roulette.pck": 344705792,
+        "buckshot-roulette.wasm": 43444261
+      },
+
+      focusCanvas: false,
+      gdextensionLibs: []
+    };
+
+    const GODOT_THREADS_ENABLED = false;
+    const engine = new Engine(GODOT_CONFIG);
+
+    function run() {
+      const loadingText =
+        document.getElementById("loading-text");
+
+      const statusOverlay =
+        document.getElementById("status");
+
+      const statusProgress =
+        document.getElementById("status-progress");
+
+      const statusNotice =
+        document.getElementById("status-notice");
+
+      if (loadingText) {
+        loadingText.remove();
+      }
+
+      let initializing = true;
+      let statusMode = "";
+
+      function setStatusMode(mode) {
+        if (statusMode === mode || !initializing) {
+          return;
+        }
+
+        if (mode === "hidden") {
+          statusOverlay.remove();
+          initializing = false;
+          return;
+        }
+
+        statusOverlay.style.visibility = "visible";
+
+        statusProgress.style.display =
+          mode === "progress" ? "block" : "none";
+
+        statusNotice.style.display =
+          mode === "notice" ? "block" : "none";
+
+        statusMode = mode;
+      }
+
+      function setStatusNotice(text) {
+        while (statusNotice.lastChild) {
+          statusNotice.removeChild(
+            statusNotice.lastChild
+          );
+        }
+
+        text.split("\n").forEach((line) => {
+          statusNotice.appendChild(
+            document.createTextNode(line)
+          );
+
+          statusNotice.appendChild(
+            document.createElement("br")
+          );
+        });
+      }
+
+      function displayFailureNotice(err) {
+        console.error(err);
+
+        if (err instanceof Error) {
+          setStatusNotice(err.message);
+        } else if (typeof err === "string") {
+          setStatusNotice(err);
+        } else {
+          setStatusNotice(
+            "An unknown error occurred."
+          );
+        }
+
+        setStatusMode("notice");
+        initializing = false;
+      }
+
+      const missing = Engine.getMissingFeatures({
+        threads: GODOT_THREADS_ENABLED
+      });
+
+      if (missing.length !== 0) {
+        displayFailureNotice(
+          "Error\nThe following features required " +
+          "to run Godot are missing:\n" +
+          missing.join("\n")
+        );
+
+        return;
+      }
+
+      setStatusMode("progress");
+
+      engine.startGame({
+        onProgress(current, total) {
+          if (current > 0 && total > 0) {
+            statusProgress.value = current;
+            statusProgress.max = total;
+          } else {
+            statusProgress.removeAttribute("value");
+            statusProgress.removeAttribute("max");
+          }
+        }
+      }).then(
+        () => setStatusMode("hidden"),
+        displayFailureNotice
+      );
+    }
+
+    window.godotRunStart = run;
+  </script>
+
+  <!-- Start downloading/merging the split PCK + WASM LAST -->
+  <script src="main.js"></script>
+
+</body>
+</html>
