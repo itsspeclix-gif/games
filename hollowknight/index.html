@@ -89,7 +89,7 @@
           frameworkUrl: assetBase + 'hk.framework.js',
           codeUrl,
           streamingAssetsUrl: gameBase + 'StreamingAssets/',
-          devicePixelRatio: isIOS ? 0.80 : 1.00,
+          devicePixelRatio: isIOS ? 1.00 : 1.00,
           dataPartUrls: partUrls('hk.data', 42),
           mountDataParts: (module, urls) =>
             mountUnityDataParts(module, urls, { onProgress: updateMountProgress })
