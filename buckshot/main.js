@@ -1,47 +1,131 @@
-const originalFetch = window.fetch;
+const originalFetch = window.fetch.bind(window);
 
-function mergeFiles(fileParts) {
-    return new Promise((resolve, reject) => {
-        let buffers = [];
+const EXPECTED_PCK = 344705792;
+const EXPECTED_WASM = 43444261;
+const EXPECTED_TOTAL = EXPECTED_PCK + EXPECTED_WASM;
 
-        function fetchPart(index) {
-            if (index >= fileParts.length) {
-                let mergedBlob = new Blob(buffers);
-                let mergedFileUrl = URL.createObjectURL(mergedBlob);
-                resolve(mergedFileUrl);
-                return;
-            }
-            fetch(fileParts[index]).then((response) => {
-                if (!response.ok) throw new Error("Missing part: " + fileParts[index]);
-                return response.arrayBuffer();
-            }).then((data) => {
-                buffers.push(data);
-                fetchPart(index + 1);
-            }).catch(reject);
-        }
-        fetchPart(0);
+let downloadedBytes = 0;
+
+function setLoadingText(text) {
+    const el = document.getElementById("loading-text");
+    if (el) el.textContent = text;
+}
+
+function formatMB(bytes) {
+    return (bytes / 1024 / 1024).toFixed(1);
+}
+
+async function downloadPart(path) {
+    const url = new URL(path, document.baseURI);
+
+    const response = await originalFetch(url, {
+        cache: "force-cache"
     });
+
+    if (!response.ok) {
+        throw new Error(
+            `${path} failed: HTTP ${response.status}`
+        );
+    }
+
+    const buffer = await response.arrayBuffer();
+
+    downloadedBytes += buffer.byteLength;
+
+    setLoadingText(
+        `Downloading Buckshot Roulette... ` +
+        `${formatMB(downloadedBytes)} / ` +
+        `${formatMB(EXPECTED_TOTAL)} MB`
+    );
+
+    return buffer;
 }
 
-function getParts(file, start, end) {
-    let parts = [];
+async function mergeFiles(file, start, end, expectedSize, mime) {
+    const chunks = [];
+    let size = 0;
+
     for (let i = start; i <= end; i++) {
-        parts.push(file + ".part" + i);
+        const buffer = await downloadPart(
+            `${file}.part${i}`
+        );
+
+        chunks.push(buffer);
+        size += buffer.byteLength;
     }
-    return parts;
+
+    if (size !== expectedSize) {
+        throw new Error(
+            `${file} size mismatch: got ${size}, expected ${expectedSize}`
+        );
+    }
+
+    const blob = new Blob(chunks, {
+        type: mime
+    });
+
+    return URL.createObjectURL(blob);
 }
-Promise.all([
-    mergeFiles(getParts("buckshot-roulette.pck", 1, 17)),
-    mergeFiles(getParts("buckshot-roulette.wasm", 1, 3))
-]).then(([pckUrl, wasmUrl]) => {
-    window.fetch = async function (url, ...args) {
-        if (url.endsWith("buckshot-roulette.pck")) {
-            return originalFetch(pckUrl, ...args);
-        } else if (url.endsWith("buckshot-roulette.wasm")) {
-            return originalFetch(wasmUrl, ...args);
-        } else {
-            return originalFetch(url, ...args);
-        }
-    };
-    window.godotRunStart();
-});
+
+(async () => {
+    try {
+        setLoadingText(
+            `Downloading Buckshot Roulette... 0 / ` +
+            `${formatMB(EXPECTED_TOTAL)} MB`
+        );
+
+        const [pckUrl, wasmUrl] = await Promise.all([
+            mergeFiles(
+                "buckshot-roulette.pck",
+                1,
+                17,
+                EXPECTED_PCK,
+                "application/octet-stream"
+            ),
+
+            mergeFiles(
+                "buckshot-roulette.wasm",
+                1,
+                3,
+                EXPECTED_WASM,
+                "application/wasm"
+            )
+        ]);
+
+        setLoadingText(
+            "Starting Buckshot Roulette..."
+        );
+
+        window.fetch = function(input, init) {
+            let url;
+
+            if (typeof input === "string") {
+                url = input;
+            } else if (input instanceof URL) {
+                url = input.href;
+            } else {
+                url = input.url;
+            }
+
+            if (url.endsWith("buckshot-roulette.pck")) {
+                return originalFetch(pckUrl, init);
+            }
+
+            if (url.endsWith("buckshot-roulette.wasm")) {
+                return originalFetch(wasmUrl, init);
+            }
+
+            return originalFetch(input, init);
+        };
+
+        window.godotRunStart();
+
+    } catch (err) {
+        console.error("Buckshot startup failed:", err);
+
+        setLoadingText(
+            "Buckshot failed: " +
+            (err?.message || String(err))
+        );
+    }
+})();
