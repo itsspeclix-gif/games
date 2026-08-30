@@ -1,0 +1,249 @@
+name: Build Hollow Knight 2 MiB data
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hollowknight-build-data2m.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-data2m:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Split and verify Hollow Knight data
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+          import shutil
+
+          root = Path('hollowknight/build')
+          out = root / 'data2m'
+
+          SOURCE_COUNT = 42
+          SOURCE_NORMAL = 20_866_662
+          SOURCE_FINAL = 13_479_747
+          TOTAL_SIZE = 869_012_889
+          CHUNK_SIZE = 2 * 1024 * 1024
+          CHUNK_COUNT = 415
+          FINAL_SIZE = 791_961
+          READ_SIZE = 1024 * 1024
+
+          sources = [
+              root / f'hk.data.part{i}'
+              for i in range(1, SOURCE_COUNT + 1)
+          ]
+
+          for i, path in enumerate(sources, 1):
+              if not path.is_file():
+                  raise SystemExit(f'Missing source file: {path}')
+              expected = SOURCE_FINAL if i == SOURCE_COUNT else SOURCE_NORMAL
+              actual = path.stat().st_size
+              if actual != expected:
+                  raise SystemExit(
+                      f'{path}: expected {expected}, got {actual}'
+                  )
+
+          source_total = sum(path.stat().st_size for path in sources)
+          if source_total != TOTAL_SIZE:
+              raise SystemExit(
+                  f'Source total {source_total}, expected {TOTAL_SIZE}'
+              )
+
+          if out.exists():
+              shutil.rmtree(out)
+          out.mkdir(parents=True)
+
+          source_sha = hashlib.sha256()
+          records = []
+
+          part_index = 1
+          part_written = 0
+          total_written = 0
+          part_sha = hashlib.sha256()
+          handle = (out / f'hk.data.part{part_index}').open('wb')
+
+          for source in sources:
+              with source.open('rb') as src:
+                  while True:
+                      block = src.read(READ_SIZE)
+                      if not block:
+                          break
+
+                      source_sha.update(block)
+                      cursor = 0
+
+                      while cursor < len(block):
+                          take = min(
+                              CHUNK_SIZE - part_written,
+                              len(block) - cursor,
+                          )
+                          piece = block[cursor:cursor + take]
+
+                          handle.write(piece)
+                          part_sha.update(piece)
+
+                          cursor += take
+                          part_written += take
+                          total_written += take
+
+                          if (
+                              part_written == CHUNK_SIZE
+                              and total_written < TOTAL_SIZE
+                          ):
+                              handle.close()
+                              records.append({
+                                  'file': f'hk.data.part{part_index}',
+                                  'size': part_written,
+                                  'sha256': part_sha.hexdigest(),
+                              })
+
+                              part_index += 1
+                              part_written = 0
+                              part_sha = hashlib.sha256()
+                              handle = (
+                                  out / f'hk.data.part{part_index}'
+                              ).open('wb')
+
+          handle.close()
+          records.append({
+              'file': f'hk.data.part{part_index}',
+              'size': part_written,
+              'sha256': part_sha.hexdigest(),
+          })
+
+          if total_written != TOTAL_SIZE:
+              raise SystemExit(
+                  f'Generated {total_written} bytes, expected {TOTAL_SIZE}'
+              )
+
+          if len(records) != CHUNK_COUNT:
+              raise SystemExit(
+                  f'Generated {len(records)} parts, expected {CHUNK_COUNT}'
+              )
+
+          if records[-1]['size'] != FINAL_SIZE:
+              raise SystemExit(
+                  f'Final part {records[-1]["size"]}, expected {FINAL_SIZE}'
+              )
+
+          generated_sha = hashlib.sha256()
+          verified_total = 0
+
+          for i in range(1, CHUNK_COUNT + 1):
+              path = out / f'hk.data.part{i}'
+              expected = FINAL_SIZE if i == CHUNK_COUNT else CHUNK_SIZE
+              actual = path.stat().st_size
+
+              if actual != expected:
+                  raise SystemExit(
+                      f'{path}: expected {expected}, got {actual}'
+                  )
+
+              with path.open('rb') as src:
+                  while True:
+                      block = src.read(READ_SIZE)
+                      if not block:
+                          break
+                      generated_sha.update(block)
+                      verified_total += len(block)
+
+          if verified_total != TOTAL_SIZE:
+              raise SystemExit(
+                  'Generated archive verification size mismatch'
+              )
+
+          if generated_sha.hexdigest() != source_sha.hexdigest():
+              raise SystemExit(
+                  'Generated archive SHA-256 does not match source archive'
+              )
+
+          manifest = {
+              'logicalSize': TOTAL_SIZE,
+              'logicalSha256': source_sha.hexdigest(),
+              'chunkSize': CHUNK_SIZE,
+              'chunkCount': CHUNK_COUNT,
+              'finalChunkSize': FINAL_SIZE,
+              'sourcePartsKept': True,
+              'parts': records,
+          }
+
+          (out / 'manifest.json').write_text(
+              json.dumps(manifest, indent=2) + '\n',
+              encoding='utf-8',
+          )
+
+          print('PASS')
+          print('Logical SHA-256:', source_sha.hexdigest())
+          print('Chunks:', CHUNK_COUNT)
+          PY
+
+      - name: Commit generated data in small batches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for START in $(seq 1 25 415); do
+            END=$((START + 24))
+            if [ "$END" -gt 415 ]; then
+              END=415
+            fi
+
+            FILES=()
+            for I in $(seq "$START" "$END"); do
+              FILES+=(
+                "hollowknight/build/data2m/hk.data.part${I}"
+              )
+            done
+
+            git add "${FILES[@]}"
+
+            if [ "$END" -eq 415 ]; then
+              git add hollowknight/build/data2m/manifest.json
+            fi
+
+            git commit \
+              -m "Add Hollow Knight 2 MiB data parts ${START}-${END}"
+
+            git -c http.version=HTTP/1.1 push origin HEAD:main
+          done
+
+      - name: Final verification
+        shell: bash
+        run: |
+          test "$(
+            find hollowknight/build/data2m \
+              -maxdepth 1 \
+              -name 'hk.data.part*' |
+            wc -l
+          )" -eq 415
+
+          test "$(
+            stat -c%s hollowknight/build/data2m/hk.data.part1
+          )" -eq 2097152
+
+          test "$(
+            stat -c%s hollowknight/build/data2m/hk.data.part415
+          )" -eq 791961
+
+          test -f hollowknight/build/data2m/manifest.json
+
+          echo "Hollow Knight data2m complete."
+          echo "Original 42 source parts were kept."
