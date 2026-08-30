@@ -44,12 +44,12 @@
   </div>
 
   <script>
-    const DATA_PART_SIZE = 2 * 1024 * 1024;
+    const DATA_PART_SIZE = 4 * 1024 * 1024;
     const DATA_TOTAL_SIZE = 869012889;
-    const DATA_PART_COUNT = Math.ceil(DATA_TOTAL_SIZE / DATA_PART_SIZE); // 415
+    const DATA_PART_COUNT = Math.ceil(DATA_TOTAL_SIZE / DATA_PART_SIZE); // 208
 
     const buildBase = 'build/';
-    const dataBase = buildBase + 'data2m/';
+    const dataBase = buildBase + 'data4m/';
 
     const canvas = document.getElementById('game');
     const loading = document.getElementById('loading');
