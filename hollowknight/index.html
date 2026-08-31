@@ -125,6 +125,15 @@
         await loadScript(buildBase + 'hk.stabilityfs.js?live=' + live);
         await loadScript(buildBase + 'hk.loader.js?live=' + live);
 
+        let neighborPreloadReady = false;
+        try {
+          await loadScript(buildBase + 'hk.preload.js?live=' + live);
+          neighborPreloadReady =
+            typeof window.installHollowKnightNeighborPreload === 'function';
+        } catch (error) {
+          console.warn('Neighbor preload helper unavailable:', error);
+        }
+
         codeUrl = await joinParts(
           numberedUrls(buildBase, 'hk.wasm', 2),
           'application/wasm',
@@ -156,6 +165,17 @@
 
         installHollowKnightPersistence(instance.Module);
         installHollowKnightKeyboardBridge(canvas);
+
+        if (neighborPreloadReady) {
+          installHollowKnightNeighborPreload(instance, {
+            mapUrl: buildBase + 'preload-analysis/preload-map.analysis.json',
+            dataPartUrls: unityConfig.dataPartUrls,
+            partSize: DATA_PART_SIZE,
+            preloadConcurrency: 2
+          }).catch(error => {
+            console.warn('Neighbor preload disabled:', error);
+          });
+        }
 
         revokeRuntimeUrl();
         loading.remove();
