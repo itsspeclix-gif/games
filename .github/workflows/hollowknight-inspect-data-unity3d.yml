@@ -1,0 +1,426 @@
+name: Inspect Hollow Knight data.unity3d contents
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hollowknight-inspect-data-unity3d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-data-unity3d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Unity parser
+        shell: bash
+        run: |
+          python3 -m pip install --quiet UnityPy
+
+      - name: Extract and inspect data.unity3d
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import bisect
+          import json
+          import os
+          import shutil
+          import struct
+          from collections import Counter
+          from pathlib import Path
+
+          import UnityPy
+
+          ROOT = Path("hollowknight/build")
+          OUT = ROOT / "analysis-data-unity3d"
+          TMP = Path("/tmp/hk-data-unity3d")
+          BUNDLE_PATH = TMP / "data.unity3d"
+
+          SOURCE_COUNT = 42
+          SOURCE_NORMAL = 20_866_662
+          SOURCE_FINAL = 13_479_747
+          TOTAL_SIZE = 869_012_889
+
+          MAGIC = b"UnityWebData1.0\x00"
+          HEADER_PREFIX_SIZE = len(MAGIC) + 4
+
+          if OUT.exists():
+              shutil.rmtree(OUT)
+          OUT.mkdir(parents=True)
+
+          if TMP.exists():
+              shutil.rmtree(TMP)
+          TMP.mkdir(parents=True)
+
+          source_parts = [
+              ROOT / f"hk.data.part{i}"
+              for i in range(1, SOURCE_COUNT + 1)
+          ]
+
+          for i, path in enumerate(source_parts, 1):
+              if not path.is_file():
+                  raise SystemExit(f"Missing source part: {path}")
+
+              expected = SOURCE_FINAL if i == SOURCE_COUNT else SOURCE_NORMAL
+              actual = path.stat().st_size
+
+              if actual != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} bytes, got {actual}"
+                  )
+
+          source_sizes = [p.stat().st_size for p in source_parts]
+
+          if sum(source_sizes) != TOTAL_SIZE:
+              raise SystemExit(
+                  f"Logical archive is {sum(source_sizes)} bytes, expected {TOTAL_SIZE}"
+              )
+
+          starts = []
+          running = 0
+          for size in source_sizes:
+              starts.append(running)
+              running += size
+
+          def logical_read(offset: int, size: int) -> bytes:
+              if offset < 0 or size < 0 or offset + size > TOTAL_SIZE:
+                  raise ValueError(
+                      f"Logical read outside archive: offset={offset}, size={size}"
+                  )
+
+              if size == 0:
+                  return b""
+
+              out = bytearray()
+              pos = offset
+              remaining = size
+
+              while remaining:
+                  part_index = bisect.bisect_right(starts, pos) - 1
+
+                  if part_index < 0 or part_index >= len(source_parts):
+                      raise RuntimeError(
+                          f"Could not resolve logical offset {pos}"
+                      )
+
+                  within = pos - starts[part_index]
+                  available = source_sizes[part_index] - within
+                  take = min(remaining, available)
+
+                  with source_parts[part_index].open("rb") as f:
+                      f.seek(within)
+                      block = f.read(take)
+
+                  if len(block) != take:
+                      raise RuntimeError(
+                          f"Short read from {source_parts[part_index]}: "
+                          f"wanted {take}, got {len(block)}"
+                      )
+
+                  out.extend(block)
+                  pos += take
+                  remaining -= take
+
+              return bytes(out)
+
+          prefix = logical_read(0, HEADER_PREFIX_SIZE)
+
+          if prefix[:len(MAGIC)] != MAGIC:
+              raise SystemExit("Unexpected UnityWebData archive magic")
+
+          header_end = struct.unpack_from("<I", prefix, len(MAGIC))[0]
+          header = logical_read(0, header_end)
+
+          entries = []
+          pos = HEADER_PREFIX_SIZE
+
+          while pos < header_end:
+              if pos + 12 > header_end:
+                  raise SystemExit("Truncated UnityWebData entry record")
+
+              offset, size, name_len = struct.unpack_from("<III", header, pos)
+              pos += 12
+
+              if name_len > header_end - pos:
+                  raise SystemExit("Truncated UnityWebData entry name")
+
+              raw_name = header[pos:pos + name_len]
+              pos += name_len
+              name = raw_name.decode("utf-8", errors="strict")
+
+              entries.append({
+                  "name": name,
+                  "offset": offset,
+                  "size": size,
+              })
+
+          matches = [e for e in entries if Path(e["name"]).name == "data.unity3d"]
+
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"Expected exactly one data.unity3d entry, found {len(matches)}"
+              )
+
+          bundle_entry = matches[0]
+
+          with BUNDLE_PATH.open("wb") as f:
+              offset = bundle_entry["offset"]
+              remaining = bundle_entry["size"]
+              step = 4 * 1024 * 1024
+
+              while remaining:
+                  take = min(step, remaining)
+                  f.write(logical_read(offset, take))
+                  offset += take
+                  remaining -= take
+
+          if BUNDLE_PATH.stat().st_size != bundle_entry["size"]:
+              raise SystemExit(
+                  f"Extracted data.unity3d size mismatch: "
+                  f"{BUNDLE_PATH.stat().st_size} != {bundle_entry['size']}"
+              )
+
+          with BUNDLE_PATH.open("rb") as f:
+              first_256 = f.read(256)
+
+          hex_head = first_256.hex()
+          ascii_head = "".join(
+              chr(b) if 32 <= b <= 126 else "."
+              for b in first_256
+          )
+
+          result = {
+              "_meta": {
+                  "productionChanged": False,
+                  "outerArchiveEntry": bundle_entry,
+                  "extractedSize": BUNDLE_PATH.stat().st_size,
+                  "first256Hex": hex_head,
+                  "first256Ascii": ascii_head,
+              },
+              "unityPy": {
+                  "loadSucceeded": False,
+                  "error": None,
+                  "environmentType": None,
+                  "fileCount": None,
+                  "files": [],
+                  "containerCount": None,
+                  "containerKeys": [],
+                  "objectTypeCounts": {},
+              },
+          }
+
+          try:
+              env = UnityPy.load(str(BUNDLE_PATH))
+              result["unityPy"]["loadSucceeded"] = True
+              result["unityPy"]["environmentType"] = type(env).__name__
+
+              files = getattr(env, "files", None)
+
+              if isinstance(files, dict):
+                  result["unityPy"]["fileCount"] = len(files)
+
+                  for key, value in files.items():
+                      rec = {
+                          "key": str(key),
+                          "valueType": type(value).__name__,
+                      }
+
+                      for attr in (
+                          "name",
+                          "path",
+                          "file_name",
+                          "cab_name",
+                          "version",
+                          "unity_version",
+                      ):
+                          try:
+                              val = getattr(value, attr, None)
+                          except Exception as exc:
+                              val = f"<error: {type(exc).__name__}: {exc}>"
+
+                          if val is not None:
+                              rec[attr] = str(val)
+
+                      try:
+                          objs = getattr(value, "objects", None)
+                          if objs is not None:
+                              rec["objectCount"] = len(objs)
+                      except Exception as exc:
+                          rec["objectCountError"] = (
+                              f"{type(exc).__name__}: {exc}"
+                          )
+
+                      try:
+                          child_files = getattr(value, "files", None)
+                          if isinstance(child_files, dict):
+                              rec["childFileCount"] = len(child_files)
+                              rec["childFileKeys"] = [
+                                  str(k) for k in child_files.keys()
+                              ][:2000]
+                      except Exception as exc:
+                          rec["childFilesError"] = (
+                              f"{type(exc).__name__}: {exc}"
+                          )
+
+                      result["unityPy"]["files"].append(rec)
+
+              container = getattr(env, "container", None)
+
+              if isinstance(container, dict):
+                  result["unityPy"]["containerCount"] = len(container)
+                  result["unityPy"]["containerKeys"] = [
+                      str(k) for k in container.keys()
+                  ][:10000]
+
+              type_counts = Counter()
+
+              try:
+                  for obj in env.objects:
+                      try:
+                          type_counts[obj.type.name] += 1
+                      except Exception:
+                          type_counts["<unknown>"] += 1
+              except Exception as exc:
+                  result["unityPy"]["objectsError"] = (
+                      f"{type(exc).__name__}: {exc}"
+                  )
+
+              result["unityPy"]["objectTypeCounts"] = dict(
+                  type_counts.most_common()
+              )
+
+          except Exception as exc:
+              result["unityPy"]["error"] = (
+                  f"{type(exc).__name__}: {exc}"
+              )
+
+          # Also gather conservative string evidence without assuming UnityPy structure.
+          # This is intentionally limited to printable runs >= 6 chars.
+          import subprocess
+
+          strings_path = OUT / "data-unity3d-strings-sample.txt"
+          cmd = (
+              f"strings -a -n 6 {BUNDLE_PATH} | "
+              f"grep -Ei "
+              f"'level[0-9]+|sharedassets|Crossroads_|Town|Fungus|Ruins|Abyss|"
+              f"Deepnest|Waterways|Hive|Room_|Tutorial_' | "
+              f"head -n 20000"
+          )
+
+          proc = subprocess.run(
+              ["bash", "-lc", cmd],
+              text=True,
+              capture_output=True,
+          )
+
+          strings_path.write_text(
+              proc.stdout,
+              encoding="utf-8",
+          )
+
+          result["stringScan"] = {
+              "exitCode": proc.returncode,
+              "lineCount": len(proc.stdout.splitlines()),
+              "stderr": proc.stderr[-4000:],
+          }
+
+          (OUT / "data-unity3d-inspection.json").write_text(
+              json.dumps(result, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          report_lines = [
+              "Hollow Knight data.unity3d inspection",
+              "",
+              "PRODUCTION CHANGED: NO",
+              "",
+              f"Outer data.unity3d offset: {bundle_entry['offset']}",
+              f"Outer data.unity3d size: {bundle_entry['size']}",
+              f"UnityPy load succeeded: {result['unityPy']['loadSucceeded']}",
+              f"UnityPy error: {result['unityPy']['error']}",
+              f"UnityPy environment type: {result['unityPy']['environmentType']}",
+              f"UnityPy top-level file count: {result['unityPy']['fileCount']}",
+              f"UnityPy container count: {result['unityPy']['containerCount']}",
+              f"String scan matched lines: {result['stringScan']['lineCount']}",
+              "",
+              "Top object types:",
+          ]
+
+          for name, count in list(
+              result["unityPy"]["objectTypeCounts"].items()
+          )[:50]:
+              report_lines.append(
+                  f"  {name}: {count}"
+              )
+
+          report_lines.extend([
+              "",
+              "First 100 UnityPy file records:",
+          ])
+
+          for rec in result["unityPy"]["files"][:100]:
+              report_lines.append(
+                  "  " + json.dumps(rec, ensure_ascii=False)
+              )
+
+          report = "\n".join(report_lines) + "\n"
+
+          (OUT / "data-unity3d-report.txt").write_text(
+              report,
+              encoding="utf-8",
+          )
+
+          print(report)
+
+          print("Generated:")
+          for path in sorted(OUT.iterdir()):
+              print(
+                  f"  {path}: {path.stat().st_size} bytes"
+              )
+          PY
+
+      - name: Commit data.unity3d inspection outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add hollowknight/build/analysis-data-unity3d
+
+          if git diff --cached --quiet; then
+            echo "Inspection outputs are unchanged."
+          else
+            git commit \
+              -m "Add Hollow Knight data.unity3d inspection"
+
+            git -c http.version=HTTP/1.1 \
+              push origin HEAD:main
+          fi
+
+      - name: Final safety check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s \
+            hollowknight/build/analysis-data-unity3d/data-unity3d-inspection.json
+
+          test -s \
+            hollowknight/build/analysis-data-unity3d/data-unity3d-report.txt
+
+          echo "data.unity3d inspection complete."
+          echo "Production Hollow Knight files were not changed."
