@@ -1,0 +1,458 @@
+name: Inspect Hollow Knight WebGL archive layout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hollowknight-inspect-webgl-archive.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Inspect exact UnityWebData archive entries
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import bisect
+          import csv
+          import json
+          import re
+          import shutil
+          import struct
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          ROOT = Path("hollowknight/build")
+          OUT = ROOT / "analysis"
+
+          SOURCE_COUNT = 42
+          SOURCE_NORMAL = 20_866_662
+          SOURCE_FINAL = 13_479_747
+          TOTAL_SIZE = 869_012_889
+
+          PHYSICAL_CHUNK = 4 * 1024 * 1024
+          EXPECTED_CHUNKS = 208
+
+          MAGIC = b"UnityWebData1.0\x00"
+          HEADER_PREFIX_SIZE = len(MAGIC) + 4
+
+          if OUT.exists():
+              shutil.rmtree(OUT)
+          OUT.mkdir(parents=True)
+
+          source_parts = [
+              ROOT / f"hk.data.part{i}"
+              for i in range(1, SOURCE_COUNT + 1)
+          ]
+
+          for i, path in enumerate(source_parts, 1):
+              if not path.is_file():
+                  raise SystemExit(f"Missing source part: {path}")
+
+              expected = SOURCE_FINAL if i == SOURCE_COUNT else SOURCE_NORMAL
+              actual = path.stat().st_size
+
+              if actual != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} bytes, got {actual}"
+                  )
+
+          source_sizes = [p.stat().st_size for p in source_parts]
+
+          if sum(source_sizes) != TOTAL_SIZE:
+              raise SystemExit(
+                  f"Logical archive is {sum(source_sizes)} bytes, "
+                  f"expected {TOTAL_SIZE}"
+              )
+
+          starts = []
+          running = 0
+
+          for size in source_sizes:
+              starts.append(running)
+              running += size
+
+          def logical_read(offset: int, size: int) -> bytes:
+              if offset < 0 or size < 0 or offset + size > TOTAL_SIZE:
+                  raise ValueError(
+                      f"Logical read outside archive: offset={offset}, size={size}"
+                  )
+
+              if size == 0:
+                  return b""
+
+              out = bytearray()
+              pos = offset
+              remaining = size
+
+              while remaining:
+                  part_index = bisect.bisect_right(starts, pos) - 1
+
+                  if part_index < 0 or part_index >= len(source_parts):
+                      raise RuntimeError(
+                          f"Could not resolve logical offset {pos}"
+                      )
+
+                  within = pos - starts[part_index]
+                  available = source_sizes[part_index] - within
+                  take = min(remaining, available)
+
+                  with source_parts[part_index].open("rb") as f:
+                      f.seek(within)
+                      block = f.read(take)
+
+                  if len(block) != take:
+                      raise RuntimeError(
+                          f"Short read from {source_parts[part_index]}: "
+                          f"wanted {take}, got {len(block)}"
+                      )
+
+                  out.extend(block)
+                  pos += take
+                  remaining -= take
+
+              return bytes(out)
+
+          prefix = logical_read(0, HEADER_PREFIX_SIZE)
+
+          if prefix[:len(MAGIC)] != MAGIC:
+              raise SystemExit("Unexpected UnityWebData archive magic")
+
+          header_end = struct.unpack_from("<I", prefix, len(MAGIC))[0]
+
+          if not (HEADER_PREFIX_SIZE <= header_end <= TOTAL_SIZE):
+              raise SystemExit(
+                  f"Invalid UnityWebData header end: {header_end}"
+              )
+
+          header = logical_read(0, header_end)
+
+          entries = []
+          pos = HEADER_PREFIX_SIZE
+
+          while pos < header_end:
+              if pos + 12 > header_end:
+                  raise SystemExit(
+                      "Truncated UnityWebData entry record"
+                  )
+
+              offset, size, name_len = struct.unpack_from(
+                  "<III", header, pos
+              )
+              pos += 12
+
+              if name_len > header_end - pos:
+                  raise SystemExit(
+                      "Truncated UnityWebData entry name"
+                  )
+
+              raw_name = header[pos:pos + name_len]
+              pos += name_len
+
+              name = raw_name.decode(
+                  "utf-8",
+                  errors="strict",
+              )
+
+              if offset > TOTAL_SIZE or size > TOTAL_SIZE - offset:
+                  raise SystemExit(
+                      f"Archive entry outside logical data: {name}"
+                  )
+
+              if size:
+                  first_chunk = offset // PHYSICAL_CHUNK + 1
+                  last_chunk = (
+                      (offset + size - 1) // PHYSICAL_CHUNK + 1
+                  )
+                  chunk_count = last_chunk - first_chunk + 1
+              else:
+                  first_chunk = None
+                  last_chunk = None
+                  chunk_count = 0
+
+              path = Path(name)
+              suffix = "".join(path.suffixes).lower()
+
+              entries.append({
+                  "index": len(entries),
+                  "name": name,
+                  "basename": path.name,
+                  "parent": str(path.parent),
+                  "suffix": suffix,
+                  "offset": offset,
+                  "size": size,
+                  "firstChunk": first_chunk,
+                  "lastChunk": last_chunk,
+                  "chunkCount": chunk_count,
+              })
+
+          if pos != header_end:
+              raise SystemExit(
+                  "UnityWebData header did not end on a record boundary"
+              )
+
+          actual_chunks = (
+              TOTAL_SIZE + PHYSICAL_CHUNK - 1
+          ) // PHYSICAL_CHUNK
+
+          if actual_chunks != EXPECTED_CHUNKS:
+              raise SystemExit(
+                  f"Unexpected 4 MiB geometry: "
+                  f"{actual_chunks} chunks"
+              )
+
+          if not entries:
+              raise SystemExit(
+                  "UnityWebData archive contains no entries"
+              )
+
+          suffix_counts = Counter(
+              entry["suffix"] or "(none)"
+              for entry in entries
+          )
+
+          parent_counts = Counter(
+              entry["parent"]
+              for entry in entries
+          )
+
+          candidate_pattern = re.compile(
+              r"("
+              r"level|scene|sharedassets|global|resources|"
+              r"asset|bundle|data|catalog|manifest|"
+              r"crossroads|town|fungus|ruins|abyss|"
+              r"deepnest|hive|waterways|dream|"
+              r"room_|tutorial"
+              r")",
+              re.IGNORECASE,
+          )
+
+          candidates = [
+              entry
+              for entry in entries
+              if candidate_pattern.search(entry["name"])
+          ]
+
+          large_entries = sorted(
+              entries,
+              key=lambda entry: entry["size"],
+              reverse=True,
+          )[:100]
+
+          archive_json = {
+              "_meta": {
+                  "logicalSize": TOTAL_SIZE,
+                  "headerBytes": header_end,
+                  "entryCount": len(entries),
+                  "physicalChunkSize": PHYSICAL_CHUNK,
+                  "physicalChunkCount": EXPECTED_CHUNKS,
+                  "productionChanged": False,
+              },
+              "entries": entries,
+          }
+
+          (OUT / "archive-entries.json").write_text(
+              json.dumps(
+                  archive_json,
+                  indent=2,
+              ) + "\n",
+              encoding="utf-8",
+          )
+
+          with (
+              OUT / "archive-entries.tsv"
+          ).open(
+              "w",
+              encoding="utf-8",
+              newline="",
+          ) as f:
+              writer = csv.writer(
+                  f,
+                  delimiter="\t",
+                  lineterminator="\n",
+              )
+
+              writer.writerow([
+                  "index",
+                  "name",
+                  "basename",
+                  "parent",
+                  "suffix",
+                  "offset",
+                  "size",
+                  "first_chunk",
+                  "last_chunk",
+                  "chunk_count",
+              ])
+
+              for entry in entries:
+                  writer.writerow([
+                      entry["index"],
+                      entry["name"],
+                      entry["basename"],
+                      entry["parent"],
+                      entry["suffix"],
+                      entry["offset"],
+                      entry["size"],
+                      (
+                          entry["firstChunk"]
+                          if entry["firstChunk"] is not None
+                          else ""
+                      ),
+                      (
+                          entry["lastChunk"]
+                          if entry["lastChunk"] is not None
+                          else ""
+                      ),
+                      entry["chunkCount"],
+                  ])
+
+          candidate_lines = [
+              (
+                  f"{entry['index']:4d}\t"
+                  f"{entry['offset']:10d}\t"
+                  f"{entry['size']:10d}\t"
+                  f"{entry['firstChunk'] or '-'}-"
+                  f"{entry['lastChunk'] or '-'}\t"
+                  f"{entry['name']}"
+              )
+              for entry in candidates
+          ]
+
+          (OUT / "candidate-scene-files.txt").write_text(
+              "\n".join(candidate_lines) + "\n",
+              encoding="utf-8",
+          )
+
+          largest_lines = [
+              (
+                  f"{entry['size']:10d}\t"
+                  f"{entry['firstChunk'] or '-'}-"
+                  f"{entry['lastChunk'] or '-'}\t"
+                  f"{entry['name']}"
+              )
+              for entry in large_entries
+          ]
+
+          (OUT / "largest-archive-entries.txt").write_text(
+              "\n".join(largest_lines) + "\n",
+              encoding="utf-8",
+          )
+
+          summary_lines = [
+              "Hollow Knight WebGL archive layout diagnostic",
+              "",
+              "PRODUCTION CHANGED: NO",
+              "DATA MODE: 4 MiB",
+              "",
+              f"Logical archive bytes: {TOTAL_SIZE}",
+              f"UnityWebData header bytes: {header_end}",
+              f"Archive entry count: {len(entries)}",
+              f"Candidate scene/asset names: {len(candidates)}",
+              "",
+              "Top suffixes:",
+          ]
+
+          for suffix, count in suffix_counts.most_common(30):
+              summary_lines.append(
+                  f"  {suffix}: {count}"
+              )
+
+          summary_lines.extend([
+              "",
+              "Top parent directories:",
+          ])
+
+          for parent, count in parent_counts.most_common(30):
+              summary_lines.append(
+                  f"  {parent}: {count}"
+              )
+
+          summary_lines.extend([
+              "",
+              "First 50 exact archive names:",
+          ])
+
+          for entry in entries[:50]:
+              summary_lines.append(
+                  f"  {entry['name']}"
+              )
+
+          summary_lines.extend([
+              "",
+              "Last 50 exact archive names:",
+          ])
+
+          for entry in entries[-50:]:
+              summary_lines.append(
+                  f"  {entry['name']}"
+              )
+
+          summary = "\n".join(summary_lines) + "\n"
+
+          (OUT / "archive-layout-report.txt").write_text(
+              summary,
+              encoding="utf-8",
+          )
+
+          print(summary)
+
+          print("Generated:")
+          for path in sorted(OUT.iterdir()):
+              print(
+                  f"  {path}: "
+                  f"{path.stat().st_size} bytes"
+              )
+          PY
+
+      - name: Commit diagnostic outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add hollowknight/build/analysis
+
+          if git diff --cached --quiet; then
+            echo "Diagnostic outputs are unchanged."
+          else
+            git commit \
+              -m "Add Hollow Knight WebGL archive layout analysis"
+
+            git -c http.version=HTTP/1.1 \
+              push origin HEAD:main
+          fi
+
+      - name: Final safety check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s \
+            hollowknight/build/analysis/archive-entries.json
+
+          test -s \
+            hollowknight/build/analysis/archive-entries.tsv
+
+          test -s \
+            hollowknight/build/analysis/archive-layout-report.txt
+
+          echo "Archive-layout diagnostic complete."
+          echo "Production Hollow Knight files were not changed."
