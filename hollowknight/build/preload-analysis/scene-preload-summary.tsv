@@ -1,0 +1,502 @@
+scene	level	neighbors	direct_chunk_count	neighbor_chunk_count	direct_chunks	neighbor_chunks
+Pre_Menu_Intro	0		10	0	3,4,5,6,7,8,9,10,11,144	
+Menu_Title	1		5	0	11,12,13,144,145	
+Quit_To_Menu	2		1	0	13	
+BetaEnd	3		1	0	13	
+Knight_Pickup	4		1	0	13	
+Opening_Sequence	5		6	0	13,196,197,198,199,200	
+Tutorial_01	6	Cliffs_02,Town	5	6	13,14,15,200,201	15,16,76,77,202,203
+Town	7	Crossroads_01,Grimm_Divine,Grimm_Main_Tent,Mines_10,Room_Bretta,Room_Ouiji,Room_Town_Stag_Station,Room_mapper,Room_shop,Tutorial_01	4	27	15,16,202,203	13,14,15,16,17,18,19,20,22,23,26,28,29,36,37,80,106,107,148,154,161,168,170,200,201,206,207
+Cinematic_Stag_travel	8		2	0	16,203	
+Room_Town_Stag_Station	9	Town	5	4	16,17,18,206,207	15,16,202,203
+Room_Charm_Shop	10	Crossroads_04	4	3	18,19,145,146	37,38,173
+Room_Mender_House	11	Crossroads_04	1	3	19	37,38,173
+Room_mapper	12	Town	3	4	19,20,148	15,16,202,203
+Room_nailmaster	13	Cliffs_02	3	2	20,21,149	76,77
+Room_nailmaster_02	14	Fungus1_15	3	1	21,150,151	62
+Room_nailmaster_03	15	Deepnest_East_06	3	2	21,22,151	90,91
+Room_nailsmith	16	Ruins1_04	3	3	22,23,152	50,51,207
+Room_shop	17	Town	3	4	22,23,154	15,16,202,203
+Room_Sly_Storeroom	18		2	0	23,154	
+Room_temple	19	Crossroads_02	5	1	23,24,155,156,157	37
+Room_ruinhouse	20	Crossroads_04	2	3	24,157	37,38,173
+Room_Mask_Maker	21	Deepnest_42	3	1	24,25,157	88
+Room_Mansion	22	RestingGrounds_12	2	1	25,158	79
+Room_Tram	23		3	0	25,26,158	
+Room_Tram_RG	24		1	0	26	
+Room_Bretta	25	Town	1	4	26	15,16,202,203
+Room_Bretta_Basement	26		2	0	26,27	
+Room_Fungus_Shaman	27	Fungus3_44	4	1	27,28,160,161	74
+Room_Ouiji	28	Town	3	4	28,29,161	15,16,202,203
+Room_Jinn	29		2	0	29,161	
+Room_Colosseum_01	30	Deepnest_East_09,Room_Colosseum_02	3	5	29,30,162	30,31,91,162,163
+Room_Colosseum_02	31	Room_Colosseum_01,Room_Colosseum_Spectate	4	5	30,31,162,163	29,30,36,162,165
+Room_Colosseum_Bronze	32		5	0	31,32,33,163,164	
+Room_Colosseum_Silver	33		3	0	33,34,164	
+Room_Colosseum_Gold	34		4	0	34,35,36,164	
+Room_Colosseum_Spectate	35	GG_Lurker,Room_Colosseum_02	2	7	36,165	30,31,122,123,162,163,194
+Room_Slug_Shrine	36	Fungus1_26	3	1	36,166,167	64
+Crossroads_01	37	Crossroads_02,Crossroads_07,Town	3	8	36,37,168	15,16,37,38,193,194,202,203
+Crossroads_02	38	Crossroads_01,Crossroads_39,Room_temple	1	9	37	23,24,36,37,43,155,156,157,168
+Crossroads_03	39	Crossroads_15,Crossroads_16,Crossroads_19,Crossroads_21,Crossroads_47,Mines_33	3	6	37,169,170	41,42,45,82,200,203
+Crossroads_04	40	Crossroads_19,Crossroads_27,Crossroads_50,Room_Charm_Shop,Room_Mender_House,Room_ruinhouse	3	11	37,38,173	18,19,24,41,42,46,145,146,157,200,203
+Crossroads_05	41	Crossroads_07,Crossroads_40	1	4	38	38,43,193,194
+Crossroads_06	42	Crossroads_10,Crossroads_33,Crossroads_ShamanTemple	1	8	38	38,39,42,44,45,195,201,203
+Crossroads_07	43	Crossroads_01,Crossroads_05,Crossroads_11_alt,Crossroads_25,Crossroads_33,Crossroads_38	3	10	38,193,194	36,37,38,40,42,43,168,200,201,202
+Crossroads_08	44	Crossroads_13,Crossroads_18,Crossroads_30,Crossroads_33	1	4	38	41,42,200,201
+Crossroads_09	45	Crossroads_33,Crossroads_36	2	2	38,194	42,201
+Crossroads_10	46	Crossroads_06,Crossroads_21	3	4	38,39,195	38,41,42,200
+Crossroads_10_preload	47		2	0	39,40	
+Crossroads_10_boss	48		3	0	40,195,196	
+Crossroads_10_boss_defeated	49		2	0	40,196	
+Crossroads_11_alt	50	Crossroads_07,Fungus1_01	2	6	40,200	38,58,59,149,193,194
+Crossroads_12	51	Crossroads_33,Crossroads_35	3	2	40,41,200	42,201
+Crossroads_13	52	Crossroads_08,Crossroads_42	1	2	41	38,43
+Crossroads_14	53	Crossroads_16,Crossroads_39,Crossroads_45,Crossroads_48	2	4	41,200	41,43,45,203
+Crossroads_15	54	Crossroads_03,Crossroads_27	1	4	41	37,42,169,170
+Crossroads_16	55	Crossroads_03,Crossroads_14,Crossroads_40	1	6	41	37,41,43,169,170,200
+Crossroads_18	56	Crossroads_08,Crossroads_52,Fungus2_06	2	5	41,200	38,46,66,67,203
+Crossroads_19	57	Crossroads_03,Crossroads_04,Crossroads_42,Crossroads_43	2	6	41,200	37,38,43,169,170,173
+Crossroads_21	58	Crossroads_03,Crossroads_10,Crossroads_22	3	7	41,42,200	37,38,39,42,169,170,195
+Crossroads_22	59	Crossroads_21	1	3	42	41,42,200
+Crossroads_25	60	Crossroads_07,Crossroads_36	1	4	42	38,42,193,194
+Crossroads_27	61	Crossroads_04,Crossroads_15,Crossroads_31,Crossroads_46	1	7	42	37,38,41,42,43,44,173
+Crossroads_30	62	Crossroads_08	2	1	42,201	38
+Crossroads_31	63	Crossroads_27	1	1	42	42
+Crossroads_33	64	Crossroads_06,Crossroads_07,Crossroads_08,Crossroads_09,Crossroads_12	2	6	42,201	38,40,41,193,194,200
+Crossroads_35	65	Crossroads_12,Fungus3_26	1	5	42	40,41,72,73,200
+Crossroads_36	66	Crossroads_09,Crossroads_25	1	3	42	38,42,194
+Crossroads_37	67	Crossroads_49	1	2	42	45,203
+Crossroads_38	68	Crossroads_07	4	3	42,43,201,202	38,193,194
+Crossroads_39	69	Crossroads_02,Crossroads_14	1	3	43	37,41,200
+Crossroads_40	70	Crossroads_05,Crossroads_16	1	2	43	38,41
+Crossroads_42	71	Crossroads_13,Crossroads_19	1	2	43	41,200
+Crossroads_43	72	Crossroads_19,Crossroads_49	1	4	43	41,45,200,203
+Crossroads_45	73	Crossroads_14,Mines_01	2	6	43,203	41,79,80,159,160,200
+Crossroads_46	74	Crossroads_27	2	1	43,44	42
+Crossroads_46b	75	RestingGrounds_02	1	3	44	77,78,159
+Crossroads_ShamanTemple	76	Crossroads_06	3	1	44,45,203	38
+Crossroads_47	77	Crossroads_03	2	3	45,203	37,169,170
+Crossroads_48	78	Crossroads_14	1	2	45	41,200
+Crossroads_49	79	Crossroads_37,Crossroads_43	2	2	45,203	42,43
+Crossroads_49b	80	Ruins1_28	2	1	45,46	55
+Crossroads_50	81	Crossroads_04,RestingGrounds_06	2	4	46,203	37,38,78,173
+Crossroads_52	82	Crossroads_18	2	2	46,203	41,200
+Ruins_House_01	83	Ruins2_04	6	1	46,47,203,204,205,206	57
+Ruins_House_02	84	Ruins2_04	3	1	47,48,206	57
+Ruins_House_03	85	Ruins2_04,Waterways_07	2	2	48,206	57,102
+Ruins_Elevator	86	Ruins2_04,Ruins_Bathhouse	3	4	48,49,206	49,50,57,206
+Ruins_Bathhouse	87	Ruins2_10b,Ruins_Elevator	3	4	49,50,206	48,49,58,206
+Ruins1_01	88	Fungus2_21,Ruins1_02,Ruins1_17	2	5	50,206	50,52,53,69,154
+Ruins1_02	89	Ruins1_01,Ruins1_03	1	3	50	50,206,207
+Ruins1_03	90	Ruins1_02,Ruins1_04,Ruins1_05b,Ruins1_05c	2	4	50,207	50,51,52,207
+Ruins1_04	91	Room_GG_Shortcut,Room_nailsmith,Ruins1_03	3	7	50,51,207	22,23,50,127,152,195,207
+Ruins1_05	92	Ruins1_05c,Ruins1_09,Ruins1_18,Ruins1_31	2	4	51,207	52,53,55,148
+Ruins1_05b	93	Ruins1_03,Ruins1_05c,Ruins1_27,Waterways_01	3	10	51,52,207	50,52,54,55,100,146,147,148,165,207
+Ruins1_05c	94	Ruins1_03,Ruins1_05,Ruins1_05b	1	4	52	50,51,52,207
+Ruins1_06	95	Ruins1_17,Ruins1_31	1	4	52	52,53,55,148
+Ruins1_09	96	Ruins1_05,Ruins1_23	1	4	52	51,53,207,208
+Ruins1_17	97	Ruins1_01,Ruins1_06,Ruins1_28	2	4	52,53	50,52,55,206
+Ruins1_18	98	Ruins1_05,Ruins2_01,Ruins2_03b	1	3	53	51,56,207
+Ruins1_23	99	Ruins1_09,Ruins1_25,Ruins1_30,Ruins1_31	3	5	53,207,208	52,53,54,55,148
+Ruins1_30	100	Ruins1_23,Ruins1_24,Ruins1_25	1	5	53	53,54,146,207,208
+Ruins1_24	101	Ruins1_30,Ruins1_32	2	2	53,146	53,56
+Ruins1_24_boss	102		3	0	53,54,146	
+Ruins1_24_boss_defeated	103		1	0	54	
+Ruins1_25	104	Ruins1_23,Ruins1_30	1	3	54	53,207,208
+Ruins1_27	105	Ruins1_05b,Ruins2_01_b	5	4	54,55,146,147,148	51,52,56,207
+Ruins1_28	106	Crossroads_49b,Ruins1_17,Ruins1_29	1	5	55	45,46,52,53,55
+Ruins1_29	107	Ruins1_28	1	1	55	55
+Ruins1_31	108	Ruins1_05,Ruins1_06,Ruins1_23,Ruins1_31b	2	8	55,148	51,52,53,55,56,148,207,208
+Ruins1_31b	109	Ruins1_31	3	2	55,56,148	55,148
+Ruins1_32	110	Ruins1_24	1	2	56	53,146
+Ruins2_01	111	Ruins1_18,Ruins2_01_b,Ruins2_03b	1	2	56	53,56
+Ruins2_01_b	112	Ruins1_27,Ruins2_01,Ruins2_04	1	7	56	54,55,56,57,146,147,148
+Ruins2_03	113	Ruins2_03b,Ruins2_Watcher_Room	2	5	56,148	56,58,59,148,149
+Ruins2_03b	114	Ruins1_18,Ruins2_01,Ruins2_03	1	3	56	53,56,148
+Ruins2_03_boss	115		3	0	56,57,148	
+Ruins2_04	116	Abyss_01,Ruins2_01_b,Ruins2_06,Ruins_Elevator,Ruins_House_01,Ruins_House_02,Ruins_House_03	1	13	57	46,47,48,49,56,57,93,94,148,203,204,205,206
+Ruins2_05	117	Ruins2_06,Ruins2_09,Ruins2_10b	1	3	57	57,58,148
+Ruins2_06	118	Ruins2_04,Ruins2_05,Ruins2_07,Ruins2_08	2	1	57,148	57
+Ruins2_07	119	Deepnest_East_03,Ruins2_06,Ruins2_11_b	1	6	57	57,58,89,90,148,162
+Ruins2_08	120	Ruins2_06	1	2	57	57,148
+Ruins2_09	121	Ruins2_05	2	1	57,58	57
+Ruins2_10	122	RestingGrounds_06,RestingGrounds_10	1	3	58	78,79,159
+Ruins2_10b	123	Deepnest_East_09,Ruins2_05,Ruins_Bathhouse	1	5	58	49,50,57,91,206
+Ruins2_11	124	Ruins2_11_b	2	1	58,148	58
+Ruins2_11_b	125	Deepnest_East_07,Ruins2_07,Ruins2_11	1	4	58	57,58,91,148
+Ruins2_11_boss	126		2	0	58,148	
+Ruins2_Watcher_Room	127	Ruins2_03	4	2	58,59,148,149	56,148
+Fungus1_01	128	Crossroads_11_alt,Fungus1_01b	3	3	58,59,149	40,59,200
+Fungus1_01b	129	Fungus1_01,Fungus1_02	1	3	59	58,59,149
+Fungus1_02	130	Fungus1_01b,Fungus1_06,Fungus1_17	2	3	59,149	59,63,150
+Fungus1_03	131	Fungus1_05,Fungus1_17,Fungus1_31	1	3	59	59,63,64
+Fungus1_04	132	Fungus1_21,Fungus1_25	1	3	59	63,64,151
+Fungus1_04_boss	133		3	0	59,149,150	
+Fungus1_05	134	Fungus1_03,Fungus1_10,Fungus1_14	1	5	59	59,61,62,150,151
+Fungus1_06	135	Fungus1_02,Fungus1_07	2	2	59,150	59,149
+Fungus1_07	136	Fungus1_06,Fungus1_08,Fungus1_19	1	5	59	59,60,61,63,150
+Fungus1_08	137	Fungus1_07	4	1	59,60,61,150	59
+Fungus1_09	138	Fungus1_15,Fungus1_30	2	2	61,150	62,64
+Fungus1_10	139	Fungus1_05,Fungus1_19,Fungus1_30	2	3	61,150	59,63,64
+Fungus1_11	140	Fungus1_19,Fungus1_29,Fungus1_34,Fungus1_37,Fungus3_01	2	6	61,151	63,64,65,71,152,157
+Fungus1_12	141	Fungus1_13,Fungus1_29	1	4	61	61,62,64,152
+Fungus1_13	142	Fungus1_12,Fungus3_22	2	2	61,62	61,72
+Fungus1_14	143	Fungus1_05	3	1	61,62,151	59
+Fungus1_15	144	Fungus1_09,Room_nailmaster_02	1	4	62	21,61,150,151
+Fungus1_16_alt	145	Fungus1_22	2	1	62,63	63
+Fungus1_17	146	Fungus1_02,Fungus1_03	1	2	63	59,149
+Fungus1_19	147	Fungus1_07,Fungus1_10,Fungus1_11	1	4	63	59,61,150,151
+Fungus1_20_v02	148	Fungus1_21,Fungus1_28,Fungus1_32	2	3	63,151	63,64,151
+Fungus1_21	149	Fungus1_04,Fungus1_20_v02,Fungus1_22,Fungus1_32	2	4	63,151	59,63,64,151
+Fungus1_22	150	Fungus1_16_alt,Fungus1_21,Fungus1_30	1	4	63	62,63,64,151
+Fungus1_23	151	Fungus3_13,Fungus3_48	3	3	63,151,152	71,72,74
+Fungus1_24	152	Fungus3_05	3	1	63,64,152	71
+Fungus1_25	153	Fungus1_04,Fungus1_26	1	2	64	59,64
+Fungus1_26	154	Fungus1_25,Fungus1_Slug,Room_Slug_Shrine	1	6	64	36,64,65,152,166,167
+Fungus1_28	155	Cliffs_01,Fungus1_20_v02	1	3	64	63,76,151
+Fungus1_29	156	Fungus1_11,Fungus1_12	2	2	64,152	61,151
+Fungus1_30	157	Fungus1_09,Fungus1_10,Fungus1_22,Fungus1_31	1	4	64	61,63,64,150
+Fungus1_31	158	Fungus1_03,Fungus1_30,Fungus1_32	1	2	64	59,64
+Fungus1_32	159	Fungus1_20_v02,Fungus1_21,Fungus1_31	1	3	64	63,64,151
+Fungus1_34	160	Fungus1_11,Fungus1_35	2	4	64,65	61,65,151,152
+Fungus1_35	161	Fungus1_34,Fungus1_36	2	2	65,152	64,65
+Fungus1_36	162	Fungus1_35	1	2	65	65,152
+Fungus1_37	163	Fungus1_11	1	2	65	61,151
+Fungus1_Slug	164	Fungus1_26	2	1	65,152	64
+Fungus2_01	165	Fungus2_02,Fungus2_03,Fungus2_34,Fungus3_02	2	6	65,66	66,71,152,153,154,157
+Fungus2_02	166	Fungus2_01	1	2	66	65,66
+Fungus2_03	167	Fungus2_01,Fungus2_04,Fungus2_18	4	4	66,152,153,154	65,66,69,154
+Fungus2_04	168	Fungus2_03,Fungus2_05,Fungus2_28	2	5	66,154	66,70,152,153,154
+Fungus2_05	169	Fungus2_04,Fungus2_06	2	3	66,154	66,67,154
+Fungus2_06	170	Crossroads_18,Fungus2_05,Fungus2_07,Fungus2_26,Fungus2_33	2	8	66,67	41,66,67,70,71,154,155,200
+Fungus2_07	171	Fungus2_06,Fungus2_08	2	2	67,154	66,67
+Fungus2_08	172	Fungus2_07,Fungus2_09,Fungus2_32	1	4	67	67,70,154,157
+Fungus2_09	173	Fungus2_08,Fungus2_10	2	1	67,154	67
+Fungus2_10	174	Fungus2_09,Fungus2_11,Fungus2_21	1	3	67	67,69,154
+Fungus2_11	175	Fungus2_10,Fungus2_12,Fungus2_17,Fungus2_18	1	4	67	67,68,69,154
+Fungus2_12	176	Fungus2_11,Fungus2_13	3	2	67,68,154	67,68
+Fungus2_13	177	Fungus2_12,Fungus2_14,Fungus2_23	1	5	68	67,68,69,154,155
+Fungus2_14	178	Fungus2_13,Fungus2_15,Fungus2_17	2	3	68,154	68,69,154
+Fungus2_15	179	Fungus2_14,Fungus2_25,Fungus2_31	2	5	68,154	68,69,70,154,155
+Fungus2_15_boss	180		3	0	68,69,154	
+Fungus2_15_boss_defeated	181		1	0	69	
+Fungus2_17	182	Fungus2_11,Fungus2_14,Fungus2_29	1	4	69	67,68,70,154
+Fungus2_18	183	Fungus2_03,Fungus2_11,Fungus2_19	1	6	69	66,67,69,152,153,154
+Fungus2_19	184	Fungus2_18,Fungus2_20	1	1	69	69
+Fungus2_20	185	Deepnest_01,Fungus2_19	1	3	69	69,83,84
+Fungus2_21	186	Fungus2_10,Ruins1_01	2	3	69,154	50,67,206
+Fungus2_23	187	Fungus2_13,Waterways_09	3	2	69,154,155	68,102
+Fungus2_25	188	Deepnest_16,Fungus2_15	3	3	69,70,155	68,86,154
+Fungus2_26	189	Fungus2_06	2	2	70,155	66,67
+Fungus2_28	190	Fungus2_04	1	2	70	66,154
+Fungus2_29	191	Fungus2_17,Fungus2_30	1	3	70	69,70,157
+Fungus2_30	192	Fungus2_25,Fungus2_29	2	3	70,157	69,70,155
+Fungus2_31	193	Fungus2_15	1	2	70	68,154
+Fungus2_32	194	Fungus2_08	2	1	70,157	67
+Fungus2_33	195	Fungus2_06,Fungus3_26	2	4	70,71	66,67,72,73
+Fungus2_34	196	Fungus2_01	2	2	71,157	65,66
+Fungus3_01	197	Fungus1_11,Fungus3_02,Fungus3_24,Fungus3_25	2	4	71,157	61,71,72,151
+Fungus3_02	198	Fungus2_01,Fungus3_01,Fungus3_03,Fungus3_35,Fungus3_47	1	7	71	65,66,71,73,74,157,158
+Fungus3_03	199	Fungus3_02,Fungus3_34	1	2	71	71,73
+Fungus3_04	200	Fungus3_05,Fungus3_13,Fungus3_21,Fungus3_34	1	3	71	71,72,73
+Fungus3_05	201	Fungus1_24,Fungus3_04,Fungus3_11	1	4	71	63,64,71,152
+Fungus3_08	202	Deepnest_43,Fungus3_10,Fungus3_11	1	3	71	71,88,157
+Fungus3_10	203	Fungus3_08,Fungus3_13	2	2	71,157	71,72
+Fungus3_11	204	Fungus3_05,Fungus3_08,Fungus3_39	1	3	71	71,73,158
+Fungus3_13	205	Fungus1_23,Fungus3_04,Fungus3_10,Fungus3_40,Fungus3_49	2	9	71,72	63,71,73,74,75,151,152,157,158
+Fungus3_21	206	Fungus3_04,Fungus3_22	1	2	72	71,72
+Fungus3_22	207	Fungus1_13,Fungus3_21,Fungus3_23	1	4	72	61,62,72,157
+Fungus3_23	208	Fungus3_22,Fungus3_48	2	2	72,157	72,74
+Fungus3_23_boss	209		2	0	72,157	
+Fungus3_24	210	Fungus3_01,Fungus3_30,Fungus3_44	1	4	72	71,73,74,157
+Fungus3_25	211	Fungus3_01,Fungus3_25b	1	3	72	71,72,157
+Fungus3_25b	212	Fungus3_25,Fungus3_26	1	2	72	72,73
+Fungus3_26	213	Crossroads_35,Fungus2_33,Fungus3_25b,Fungus3_27,Fungus3_28	2	5	72,73	42,70,71,72,73
+Fungus3_27	214	Fungus3_26,Fungus3_47	1	3	73	72,73,74
+Fungus3_28	215	Fungus3_26	1	2	73	72,73
+Fungus3_30	216	Fungus3_24	1	1	73	72
+Fungus3_34	217	Fungus3_03,Fungus3_04,Fungus3_44	1	2	73	71,74
+Fungus3_35	218	Fungus3_02	3	1	73,157,158	71
+Fungus3_39	219	Deepnest_01,Fungus3_11	2	3	73,158	71,83,84
+Fungus3_40	220	Fungus3_13,Fungus3_48	2	3	73,74	71,72,74
+Fungus3_40_boss	221		2	0	74,158	
+Fungus3_44	222	Fungus3_24,Fungus3_34,Room_Fungus_Shaman	1	6	74	27,28,72,73,160,161
+Fungus3_47	223	Fungus3_02,Fungus3_27,Fungus3_archive	1	4	74	71,73,75,158
+Fungus3_48	224	Fungus1_23,Fungus3_23,Fungus3_40,Room_Queen	1	10	74	63,72,73,74,99,100,151,152,157,165
+Fungus3_49	225	Fungus3_13	3	2	74,75,158	71,72
+Fungus3_50	226	Deepnest_43	1	1	75	88
+Fungus3_archive	227	Fungus3_47,Fungus3_archive_02	2	4	75,158	74,75,76,158
+Fungus3_archive_02	228	Fungus3_archive	3	2	75,76,158	75,158
+Fungus3_archive_02_boss	229		2	0	76,158	
+Cliffs_01	230	Cliffs_02,Cliffs_04,Cliffs_06,Fungus1_28	1	4	76	64,76,77,159
+Cliffs_02	231	Cliffs_01,Cliffs_03,Room_nailmaster,Town,Tutorial_01	2	13	76,77	13,14,15,16,20,21,76,77,149,200,201,202,203
+Cliffs_02_boss	232		1	0	77	
+Cliffs_03	233	Cliffs_02	1	2	77	76,77
+Cliffs_04	234	Cliffs_01,Cliffs_05	1	4	77	76,77,158,159
+Cliffs_05	235	Cliffs_04	3	1	77,158,159	77
+Cliffs_06	236	Cliffs_01	2	1	77,159	76
+RestingGrounds_02	237	Crossroads_46b,RestingGrounds_04,RestingGrounds_06	3	2	77,78,159	44,78
+RestingGrounds_02_boss	238		2	0	78,159	
+RestingGrounds_04	239	RestingGrounds_02,RestingGrounds_05	1	3	78	77,78,159
+RestingGrounds_05	240	RestingGrounds_04,RestingGrounds_07,RestingGrounds_08,RestingGrounds_09,RestingGrounds_10,RestingGrounds_17	2	3	78,159	78,79,159
+RestingGrounds_06	241	Crossroads_50,RestingGrounds_02,Ruins2_10	1	6	78	46,58,77,78,159,203
+RestingGrounds_07	242	RestingGrounds_05	2	2	78,159	78,159
+RestingGrounds_08	243	RestingGrounds_05	3	2	78,79,159	78,159
+RestingGrounds_09	244	RestingGrounds_05	1	2	79	78,159
+RestingGrounds_10	245	RestingGrounds_05,RestingGrounds_12,Ruins2_10	2	4	79,159	58,78,79,159
+RestingGrounds_12	246	RestingGrounds_10,Room_Mansion	1	4	79	25,79,158,159
+RestingGrounds_17	247	RestingGrounds_05	1	2	79	78,159
+Mines_01	248	Crossroads_45,Mines_02	4	5	79,80,159,160	43,79,80,160,203
+Mines_02	249	Mines_01,Mines_03,Mines_29,Mines_33	3	5	79,80,160	79,80,82,159,160
+Mines_03	250	Mines_02,Mines_05,Mines_17	1	4	80	79,80,81,160
+Mines_04	251	Mines_07,Mines_17,Mines_29,Mines_37	2	5	80,160	80,81,82,83,160
+Mines_05	252	Mines_03,Mines_06,Mines_11,Mines_19,Mines_30	2	4	80,160	80,81,82,160
+Mines_06	253	Mines_05,Mines_36	1	3	80	80,83,160
+Mines_07	254	Mines_04,Mines_28	1	3	80	80,82,160
+Mines_10	255	Mines_16,Mines_30,Town	1	6	80	15,16,81,82,202,203
+Mines_11	256	Mines_05,Mines_13,Mines_18	2	3	80,81	80,81,160
+Mines_13	257	Mines_11,Mines_20	1	3	81	80,81,82
+Mines_16	258	Mines_10	1	1	81	80
+Mines_17	259	Mines_03,Mines_04	2	2	81,160	80,160
+Mines_18	260	Mines_11,Mines_20,Mines_32	1	3	81	80,81,82
+Mines_18_boss	261		2	0	81,160	
+Mines_19	262	Mines_05,Mines_20	2	4	81,160	80,81,82,160
+Mines_20	263	Mines_13,Mines_18,Mines_19,Mines_23,Mines_31,Mines_37	2	5	81,82	81,82,83,160,161
+Mines_23	264	Mines_20,Mines_24,Mines_25	2	2	82,160	81,82
+Mines_24	265	Mines_23	1	2	82	82,160
+Mines_25	266	Mines_23,Mines_34	1	4	82	82,83,160,161
+Mines_28	267	Mines_07,Mines_35,RestingGrounds_02	1	5	82	77,78,80,83,159
+Mines_29	268	Mines_02,Mines_04	1	3	82	79,80,160
+Mines_30	269	Mines_05,Mines_10	1	2	82	80,160
+Mines_31	270	Mines_20	2	2	82,161	81,82
+Mines_32	271	Mines_18	1	1	82	81
+Mines_33	272	Crossroads_03,Mines_02	1	6	82	37,79,80,160,169,170
+Mines_34	273	Mines_13,Mines_23,Mines_25	3	3	82,83,161	81,82,160
+Mines_35	274	Mines_28	1	1	83	82
+Mines_36	275	Mines_06	1	1	83	80
+Mines_37	276	Mines_04,Mines_20	1	4	83	80,81,82,160
+Deepnest_01	277	Deepnest_01b,Fungus2_20,Fungus3_39	2	5	83,84	69,73,84,158,161
+Deepnest_01b	278	Deepnest_01,Deepnest_02,Deepnest_17	2	4	84,161	83,84,86,161
+Deepnest_02	279	Deepnest_01b,Deepnest_36	2	3	84,161	84,87,161
+Deepnest_03	280	Deepnest_30,Deepnest_31,Deepnest_33,Deepnest_34	2	3	84,161	86,87,161
+Deepnest_09	281	Deepnest_10	2	2	84,85	85,86
+Deepnest_10	282	Deepnest_09,Deepnest_41,Deepnest_Spider_Town,Room_spider_small	2	6	85,86	84,85,88,89,161,162
+Deepnest_14	283	Deepnest_17,Deepnest_26,Deepnest_33	2	3	86,161	86,87,161
+Deepnest_16	284	Deepnest_17,Fungus2_25	1	4	86	69,70,86,155
+Deepnest_17	285	Deepnest_01b,Deepnest_14,Deepnest_16,Deepnest_30	1	3	86	84,86,161
+Deepnest_26	286	Deepnest_14,Deepnest_26b,Deepnest_35	2	3	86,161	86,87,161
+Deepnest_26b	287	Deepnest_26	1	2	86	86,161
+Deepnest_30	288	Deepnest_03,Deepnest_17,Deepnest_37	1	4	86	84,86,87,161
+Deepnest_31	289	Deepnest_03,Deepnest_32	1	4	86	84,86,87,161
+Deepnest_32	290	Deepnest_31	3	1	86,87,161	86
+Deepnest_33	291	Deepnest_03,Deepnest_14	2	3	87,161	84,86,161
+Deepnest_34	292	Deepnest_03,Deepnest_35,Deepnest_39	2	4	87,161	84,87,88,161
+Deepnest_35	293	Deepnest_26,Deepnest_34,Deepnest_40	1	4	87	86,87,88,161
+Deepnest_36	294	Deepnest_02	1	2	87	84,161
+Deepnest_37	295	Abyss_03_b,Deepnest_30,Deepnest_38,Deepnest_44	1	4	87	86,87,88,94
+Deepnest_38	296	Deepnest_37	1	1	87	87
+Deepnest_39	297	Deepnest_34,Deepnest_41,Deepnest_42,Deepnest_45_v02	3	5	87,88,161	87,88,89,161,162
+Deepnest_40	298	Deepnest_35	2	1	88,161	87
+Deepnest_41	299	Deepnest_10,Deepnest_39	3	5	88,161,162	85,86,87,88,161
+Deepnest_42	300	Deepnest_39,Deepnest_43,Room_Mask_Maker	1	6	88	24,25,87,88,157,161
+Deepnest_43	301	Deepnest_42,Fungus3_08,Fungus3_50	1	3	88	71,75,88
+Deepnest_44	302	Deepnest_37	1	1	88	87
+Deepnest_45_v02	303	Deepnest_39	2	3	88,89	87,88,161
+Deepnest_Spider_Town	304	Deepnest_10	2	2	89,162	85,86
+Room_spider_small	305	Deepnest_10	2	2	89,162	85,86
+Deepnest_East_01	306	Abyss_03_c,Deepnest_East_02,Hive_03_c	2	3	89,162	89,94,105
+Deepnest_East_02	307	Deepnest_East_01,Deepnest_East_03,Hive_03,Waterways_14	1	6	89	89,90,102,105,162,169
+Deepnest_East_03	308	Deepnest_East_02,Deepnest_East_04,Deepnest_East_06,Deepnest_East_07,Ruins2_07	3	5	89,90,162	57,89,90,91,162
+Deepnest_East_04	309	Deepnest_East_03,Deepnest_East_07,Deepnest_East_11,Deepnest_East_15	3	5	90,91,162	89,90,91,92,162
+Deepnest_East_06	310	Deepnest_East_03,Deepnest_East_14b,Deepnest_East_16,Deepnest_East_18,Room_nailmaster_03	2	7	90,91	21,22,89,90,92,151,162
+Deepnest_East_07	311	Deepnest_East_03,Deepnest_East_04,Deepnest_East_08,Ruins2_11_b	1	5	91	58,89,90,91,162
+Deepnest_East_08	312	Deepnest_East_07,Deepnest_East_09	1	1	91	91
+Deepnest_East_09	313	Deepnest_East_08,Room_Colosseum_01,Ruins2_10b	1	5	91	29,30,58,91,162
+Deepnest_East_10	314	Deepnest_East_18	2	1	91,163	92
+Deepnest_East_11	315	Deepnest_East_04,Deepnest_East_12,Deepnest_East_13,Deepnest_East_18	1	5	91	90,91,92,162,163
+Deepnest_East_12	316	Deepnest_East_11,Deepnest_East_Hornet	2	4	91,163	91,92,93,164
+Deepnest_East_13	317	Deepnest_East_11	2	1	91,92	91
+Deepnest_East_14	318	Deepnest_East_14b,Deepnest_East_16,Deepnest_East_17	1	1	92	92
+Deepnest_East_14b	319	Deepnest_East_06,Deepnest_East_14	1	3	92	90,91,92
+Deepnest_East_15	320	Deepnest_East_04	1	3	92	90,91,162
+Deepnest_East_16	321	Deepnest_East_06,Deepnest_East_14	1	3	92	90,91,92
+Deepnest_East_17	322	Deepnest_East_14	1	1	92	92
+Deepnest_East_18	323	Deepnest_East_06,Deepnest_East_10,Deepnest_East_11	1	3	92	90,91,163
+Deepnest_East_Hornet	324	Deepnest_East_12,Room_Wyrm	3	4	92,93,164	91,93,163,164
+Deepnest_East_Hornet_boss	325		2	0	93,164	
+Room_Wyrm	326	Deepnest_East_Hornet	2	3	93,164	92,93,164
+Abyss_01	327	Abyss_02,Ruins2_04,Waterways_05,Waterways_06,Waterways_07	2	5	93,94	57,94,101,102,165
+Abyss_02	328	Abyss_01,Abyss_03	1	2	94	93,94
+Abyss_03	329	Abyss_02,Abyss_04,Abyss_17	1	4	94	94,95,98,164
+Abyss_03_b	330	Deepnest_37	1	1	94	87
+Abyss_03_c	331	Deepnest_East_01,Hive_01	1	4	94	89,105,162,169
+Abyss_04	332	Abyss_03,Abyss_05,Abyss_06_Core,Abyss_18	2	4	94,95	94,95,98,164
+Abyss_05	333	Abyss_04,Abyss_22	1	3	95	94,95,99
+Abyss_06_Core	334	Abyss_04,Abyss_08,Abyss_12,Abyss_15,Abyss_16	2	5	95,164	94,95,96,97,98
+Abyss_08	335	Abyss_06_Core	2	2	95,96	95,164
+Abyss_09	336	Abyss_10,Abyss_16,Abyss_Lighthouse_room	3	5	96,97,164	97,98,99,164,165
+Abyss_10	337	Abyss_09	2	3	97,164	96,97,164
+Abyss_12	338	Abyss_06_Core	2	2	97,98	95,164
+Abyss_15	339	Abyss_06_Core	1	2	98	95,164
+Abyss_16	340	Abyss_06_Core,Abyss_09	1	4	98	95,96,97,164
+Abyss_17	341	Abyss_03	2	1	98,164	94
+Abyss_18	342	Abyss_04,Abyss_19	1	4	98	94,95,98,164
+Abyss_19	343	Abyss_18,Abyss_20,Abyss_21	2	3	98,164	98,99,164
+Abyss_20	344	Abyss_19	3	2	98,99,164	98,164
+Abyss_21	345	Abyss_19	1	2	99	98,164
+Abyss_22	346	Abyss_05	1	1	99	95
+Abyss_Lighthouse_room	347	Abyss_09	3	3	99,164,165	96,97,164
+Room_Queen	348	Fungus3_48	3	1	99,100,165	74
+Waterways_01	349	Ruins1_05b,Waterways_02,Waterways_03,Waterways_04	2	6	100,165	51,52,100,101,165,207
+Waterways_02	350	Waterways_01,Waterways_04,Waterways_05,Waterways_06,Waterways_08	3	4	100,101,165	100,101,102,165
+Waterways_03	351	Waterways_01	2	2	101,165	100,165
+Waterways_04	352	Waterways_01,Waterways_02,Waterways_04b	1	3	101	100,101,165
+Waterways_04b	353	Waterways_04,Waterways_09	1	2	101	101,102
+Waterways_05	354	Abyss_01,Waterways_02,Waterways_15	3	8	101,102,165	93,94,100,101,102,103,165,167
+Waterways_05_boss	355		3	0	102,165,166	
+Waterways_06	356	Abyss_01,Waterways_02	1	5	102	93,94,100,101,165
+Waterways_07	357	Abyss_01,Ruins_House_03,Waterways_13,Waterways_14	1	5	102	48,93,94,102,206
+Waterways_08	358	GG_Pipeway,Waterways_02,Waterways_12	1	7	102	100,101,102,124,125,165,194
+Waterways_09	359	Fungus2_23,Waterways_04b	1	4	102	69,101,154,155
+Waterways_12	360	Waterways_08	1	1	102	102
+Waterways_12_boss	361		2	0	102,167	
+Waterways_13	362	Waterways_07	1	1	102	102
+Waterways_14	363	Deepnest_East_02,Waterways_07	1	2	102	89,102
+Waterways_15	364	Waterways_05	3	3	102,103,167	101,102,165
+White_Palace_01	365	White_Palace_02,White_Palace_03_hub,White_Palace_11	3	3	103,167,168	103,104,168
+White_Palace_02	366	White_Palace_01	2	3	103,168	103,167,168
+White_Palace_03_hub	367	White_Palace_01,White_Palace_04,White_Palace_06,White_Palace_14,White_Palace_15	3	5	103,104,168	103,104,105,167,168
+White_Palace_04	368	White_Palace_03_hub,White_Palace_14	2	3	104,168	103,104,168
+White_Palace_05	369	White_Palace_15,White_Palace_16	1	2	104	104,105
+White_Palace_06	370	White_Palace_03_hub,White_Palace_07,White_Palace_18	1	4	104	103,104,105,168
+White_Palace_07	371	White_Palace_06,White_Palace_12	2	1	104,168	104
+White_Palace_08	372	White_Palace_13	1	1	104	104
+White_Palace_09	373	White_Palace_13	2	1	104,168	104
+White_Palace_11	374	White_Palace_01	1	3	104	103,167,168
+White_Palace_12	375	White_Palace_07,White_Palace_13	1	2	104	104,168
+White_Palace_13	376	White_Palace_08,White_Palace_09,White_Palace_12	1	2	104	104,168
+White_Palace_14	377	White_Palace_03_hub,White_Palace_04	1	3	104	103,104,168
+White_Palace_15	378	White_Palace_03_hub,White_Palace_05	2	3	104,105	103,104,168
+White_Palace_16	379	White_Palace_05	1	1	105	104
+White_Palace_17	380	White_Palace_18,White_Palace_19	3	1	105,168,169	105
+White_Palace_18	381	White_Palace_06,White_Palace_17	1	4	105	104,105,168,169
+White_Palace_19	382	White_Palace_17,White_Palace_20	1	3	105	105,168,169
+White_Palace_20	383	White_Palace_19	2	1	105,169	105
+Hive_01	384	Abyss_03_c,Hive_02	2	2	105,169	94,105
+Hive_02	385	Hive_01,Hive_03_c	1	2	105	105,169
+Hive_03	386	Deepnest_East_02,Hive_03_c,Hive_04	2	2	105,169	89,105
+Hive_03_c	387	Deepnest_East_01,Hive_02,Hive_03,Hive_04	1	4	105	89,105,162,169
+Hive_04	388	Hive_03,Hive_03_c,Hive_05	1	3	105	105,106,169
+Hive_05	389	Hive_04	3	1	105,106,169	105
+Grimm_Divine	390	Town	2	4	106,170	15,16,202,203
+Grimm_Main_Tent	391	Town	3	4	106,107,170	15,16,202,203
+Grimm_Main_Tent_boss	392		3	0	107,108,170	
+Grimm_Nightmare	393		4	0	108,109,170,171	
+Dream_Nailcollection	394		4	0	109,110,171,172	
+Dream_01_False_Knight	395		2	0	110,172	
+Dream_02_Mage_Lord	396		1	0	110	
+Dream_03_Infected_Knight	397		1	0	110	
+Dream_04_White_Defender	398		3	0	110,111,172	
+Dream_Mighty_Zote	399		3	0	111,172,173	
+Dream_Guardian_Hegemol	400		4	0	111,112,173,174	
+Dream_Guardian_Lurien	401		1	0	112	
+Dream_Guardian_Monomon	402		1	0	112	
+Cutscene_Boss_Door	403		3	0	112,113,174	
+Dream_Backer_Shrine	404		1	0	113	
+Dream_Room_Believer_Shrine	405		1	0	113	
+Dream_Abyss	406		2	0	113,174	
+Dream_Final_Boss	407		4	0	113,114,115,174	
+Room_Final_Boss_Atrium	408		3	0	115,174,175	
+Room_Final_Boss_Core	409		5	0	115,116,117,118,175	
+Cinematic_Ending_A	410		4	0	118,175,176,177	
+Cinematic_Ending_B	411		4	0	118,177,178,179	
+Cinematic_Ending_C	412		6	0	118,179,180,181,182,183	
+Cinematic_Ending_D	413		5	0	118,183,184,185,186	
+Cinematic_Ending_E	414		6	0	118,186,187,188,189,190	
+End_Credits	415		1	0	118	
+Cinematic_MrMushroom	416		3	0	118,190,191	
+Menu_Credits	417		1	0	118	
+End_Game_Completion	418		1	0	118	
+PermaDeath	419		1	0	118	
+_test_cocoon_2	420		1	0	118	
+PermaDeath_Unlock	421		1	0	118	
+_test_cocoon_1	422		1	0	118	
+GG_Waterways	423	GG_Pipeway,Room_GG_Shortcut	2	5	118,191	124,125,127,194,195
+GG_Atrium	424		5	0	118,119,120,191,192	
+GG_Broken_Vessel	425		3	0	120,192,193	
+GG_Brooding_Mawlek	426		1	0	120	
+GG_Collector	427		2	0	120,193	
+GG_Crystal_Guardian	428		2	0	120,193	
+GG_Crystal_Guardian_2	429		1	0	120	
+GG_Dung_Defender	430		1	0	120	
+GG_Failed_Champion	431		1	0	120	
+GG_False_Knight	432		1	0	120	
+GG_Flukemarm	433		1	0	120	
+GG_Ghost_Galien	434		1	0	120	
+GG_Ghost_Gorb	435		1	0	120	
+GG_Ghost_Hu	436		1	0	120	
+GG_Ghost_Markoth	437		1	0	120	
+GG_Ghost_Marmu	438		1	0	120	
+GG_Ghost_No_Eyes	439		1	0	120	
+GG_Ghost_Xero	440		1	0	120	
+GG_God_Tamer	441		1	0	120	
+GG_Grey_Prince_Zote	442		1	0	120	
+GG_Grimm	443		1	0	120	
+GG_Grimm_Nightmare	444		1	0	120	
+GG_Gruz_Mother	445		1	0	120	
+GG_Hive_Knight	446		1	0	120	
+GG_Hollow_Knight	447		4	0	120,121,122,194	
+GG_Hornet_1	448		1	0	122	
+GG_Hornet_2	449		1	0	122	
+GG_Lost_Kin	450		1	0	122	
+GG_Lurker	451	Room_Colosseum_Spectate	3	2	122,123,194	36,165
+GG_Mantis_Lords	452		2	0	123,194	
+GG_Mega_Moss_Charger	453		1	0	123	
+GG_Nailmasters	454		3	0	123,124,194	
+GG_Nosk	455		1	0	124	
+GG_Oblobbles	456		1	0	124	
+GG_Painter	457		2	0	124,194	
+GG_Pipeway	458	GG_Waterways,Waterways_08	3	3	124,125,194	102,118,191
+GG_Radiance	459		3	0	125,194,195	
+GG_Sly	460		3	0	125,126,195	
+GG_Soul_Master	461		1	0	126	
+GG_Soul_Tyrant	462		1	0	126	
+GG_Spa	463		1	0	126	
+GG_Traitor_Lord	464		1	0	126	
+GG_Unlock	465		1	0	126	
+GG_Uumuu	466		1	0	126	
+GG_Vengefly	467		1	0	126	
+GG_Watcher_Knights	468		1	0	126	
+GG_White_Defender	469		1	0	126	
+GG_Workshop	470		3	0	126,127,195	
+Room_GG_Shortcut	471	GG_Waterways,Ruins1_04	2	5	127,195	50,51,118,191,207
+GG_End_Sequence	472		3	0	127,128,195	
+GG_Atrium_Roof	473		2	0	128,195	
+GG_Blue_Room	474		2	0	128,195	
+GG_Engine	475		2	0	128,195	
+GG_Engine_Prime	476		1	0	128	
+GG_Engine_Root	477		2	0	128,195	
+GG_Mage_Knight	478		1	0	128	
+GG_Vengefly_V	479		1	0	128	
+GG_Entrance_Cutscene	480		2	0	128,196	
+GG_Mighty_Zote	481		3	0	128,129,196	
+GG_Land_of_Storms	482		2	0	129,196	
+GG_Boss_Door_Entrance	483		1	0	129	
+GG_Gruz_Mother_V	484		1	0	129	
+GG_Brooding_Mawlek_V	485		2	0	129,196	
+GG_Mantis_Lords_V	486		2	0	129,196	
+GG_Nosk_Hornet	487		1	0	129	
+GG_Uumuu_V	488		1	0	129	
+GG_Ghost_Gorb_V	489		1	0	129	
+GG_Ghost_Markoth_V	490		1	0	129	
+GG_Ghost_Marmu_V	491		1	0	129	
+GG_Ghost_No_Eyes_V	492		1	0	129	
+GG_Ghost_Xero_V	493		2	0	129,130	
+GG_Mage_Knight_V	494		2	0	129,130	
+GG_Collector_V	495		1	0	130	
+GG_Nosk_V	496		1	0	130	
+GG_Wyrm	497		1	0	130	
+GG_Unn	498		1	0	130	
+GG_Door_5_Finale	499		1	0	130	
+GG_Unlock_Wastes	500		2	0	130,200	

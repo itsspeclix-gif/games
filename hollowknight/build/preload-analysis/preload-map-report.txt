@@ -1,0 +1,45 @@
+Hollow Knight neighbor preload block mapping
+
+PRODUCTION CHANGED: NO
+STATUS: ANALYSIS ONLY
+
+UnityFS engine: 2020.2.3f1
+UnityFS flags: 0x43
+UnityFS blocks: 31393
+UnityFS nodes: 1006
+Scenes mapped: 501
+Accepted vanilla transitions: 884
+
+Direct preload chunk stats: {'min': 1, 'median': 2, 'max': 10}
+Neighbor preload chunk stats: {'min': 0, 'median': 2, 'max': 27}
+
+Examples:
+
+[Town]
+  level: level7
+  neighbors: Crossroads_01, Grimm_Divine, Grimm_Main_Tent, Mines_10, Room_Bretta, Room_Ouiji, Room_Town_Stag_Station, Room_mapper, Room_shop, Tutorial_01
+  direct chunks: 15,16,202,203
+  neighbor chunks: 13,14,15,16,17,18,19,20,22,23,26,28,29,36,37,80,106,107,148,154,161,168,170,200,201,206,207
+
+[Crossroads_01]
+  level: level37
+  neighbors: Crossroads_02, Crossroads_07, Town
+  direct chunks: 36,37,168
+  neighbor chunks: 15,16,37,38,193,194,202,203
+
+[Crossroads_02]
+  level: level38
+  neighbors: Crossroads_01, Crossroads_39, Room_temple
+  direct chunks: 37
+  neighbor chunks: 23,24,36,37,43,155,156,157,168
+
+[Crossroads_04]
+  level: level40
+  neighbors: Crossroads_19, Crossroads_27, Crossroads_50, Room_Charm_Shop, Room_Mender_House, Room_ruinhouse
+  direct chunks: 37,38,173
+  neighbor chunks: 18,19,24,41,42,46,145,146,157,200,203
+
+IMPORTANT:
+This is the first map based on the actual compressed UnityFS blocks in this WebGL build.
+It includes levelN, matching sharedassetsN.assets, and matching outer sharedassetsN.resource.
+Before deployment, runtime miss logging should verify whether other dynamic/shared dependencies still cause blocking cold requests.
