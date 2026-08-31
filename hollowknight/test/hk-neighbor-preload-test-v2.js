@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'neighbor-preload-test-v2';
+  const VERSION = 'auto-neighbor-preload-test-v1';
 
   const MAP_URL =
     'https://cdn.jsdelivr.net/gh/itsspeclix-gif/games@eda4bcec2c31a5cb6a8126a6ab975fac74ba1df4/' +
@@ -11,83 +11,115 @@
     'https://cdn.jsdelivr.net/gh/itsspeclix-gif/games@main/' +
     'hollowknight/build/data4m/hk.data.part';
 
+  const PART_SIZE = 4 * 1024 * 1024;
+  const PART_COUNT = 208;
+  const PRELOAD_CONCURRENCY = 2;
+  const RECENT_READ_WINDOW_MS = 1800;
+
   if (
-    window.__hkNeighborPreloadTestV2 &&
-    typeof window.__hkNeighborPreloadTestV2.show === 'function'
+    window.__hkAutoNeighborPreloadTest &&
+    typeof window.__hkAutoNeighborPreloadTest.show === 'function'
   ) {
-    window.__hkNeighborPreloadTestV2.show();
+    window.__hkAutoNeighborPreloadTest.show();
     return;
   }
 
   const state = {
     map: null,
     gameWindow: null,
+    instance: null,
+    module: null,
+    FS: null,
     stats: null,
-    panel: null,
-    currentInput: null,
-    targetSelect: null,
-    status: null,
-    result: null,
-    live: null,
-    datalist: null,
 
-    sceneNames: [],
+    currentScene: '',
+    currentSource: '',
+    detectedAt: 0,
+
     resourceToScene: new Map(),
-
-    armed: false,
-    mode: '',
-    routeLabel: '',
-    baselineStats: null,
-    baselineXhrIndex: 0,
-
-    targetChunks: [],
-    warmMeasurements: new Map(),
-
-    xhrLog: [],
-    xhrRestore: null,
-    lastFileRestore: null,
+    recentDataReads: [],
+    candidateScene: '',
+    candidateHits: 0,
+    candidateTimer: null,
 
     warmController: null,
-    running: false,
-    liveTimer: null
+    warmGeneration: 0,
+    warmedParts: new Set(),
+    activeWarmParts: new Set(),
+
+    lastFileRestore: null,
+    dataReadRestore: null,
+
+    badge: null,
+    badgeMain: null,
+    badgeSub: null,
+    hidden: false
   };
 
-  function fmtMiB(bytes) {
-    return (Number(bytes || 0) / 1048576).toFixed(1);
+  function errorText(error) {
+    return error && error.message ? error.message : String(error);
   }
 
-  function fmtSec(ms) {
-    return (Number(ms || 0) / 1000).toFixed(2);
+  function setBadge(main, sub) {
+    if (state.badgeMain) state.badgeMain.textContent = main;
+    if (state.badgeSub) state.badgeSub.textContent = sub || '';
   }
 
-  function setStatus(text) {
-    if (state.status) state.status.textContent = text;
+  function createBadge() {
+    if (state.badge) return;
+
+    const badge = document.createElement('div');
+
+    badge.id = '__hk_auto_neighbor_preload_badge';
+    badge.style.cssText = [
+      'position:fixed',
+      'z-index:2147483647',
+      'right:10px',
+      'top:10px',
+      'max-width:min(360px,calc(100vw - 20px))',
+      'padding:9px 11px',
+      'border-radius:10px',
+      'border:1px solid rgba(255,255,255,.18)',
+      'background:rgba(12,12,20,.88)',
+      'color:#fff',
+      'font:12px/1.35 system-ui,-apple-system,sans-serif',
+      'box-shadow:0 8px 28px rgba(0,0,0,.38)',
+      'pointer-events:auto',
+      'user-select:none'
+    ].join(';');
+
+    badge.innerHTML = `
+      <div id="__hk_auto_main" style="font-weight:800">
+        HK auto preload: starting…
+      </div>
+      <div id="__hk_auto_sub"
+           style="opacity:.7;font-size:10px;margin-top:2px">
+        ${VERSION}
+      </div>
+    `;
+
+    badge.title =
+      'Automatic Hollow Knight neighbor preloading test. Click to hide.';
+
+    badge.addEventListener('click', () => {
+      badge.style.display = 'none';
+      state.hidden = true;
+    });
+
+    document.documentElement.appendChild(badge);
+
+    state.badge = badge;
+    state.badgeMain = badge.querySelector('#__hk_auto_main');
+    state.badgeSub = badge.querySelector('#__hk_auto_sub');
   }
 
-  function setResult(text) {
-    if (state.result) state.result.textContent = text;
-  }
+  function showBadge() {
+    createBadge();
 
-  function getStatsSnapshot() {
-    const s = state.stats || {};
-    return {
-      loads: Number(s.syncPartLoads || 0),
-      bytes: Number(s.syncBytes || 0),
-      blockedMs: Number(s.syncBlockedMs || 0)
-    };
-  }
-
-  function statDelta(after, before) {
-    return {
-      loads: after.loads - before.loads,
-      bytes: after.bytes - before.bytes,
-      blockedMs: after.blockedMs - before.blockedMs
-    };
-  }
-
-  function parsePartNumber(url) {
-    const match = String(url || '').match(/\/hk\.data\.part(\d+)(?:[?#]|$)/);
-    return match ? Number(match[1]) : null;
+    if (state.badge) {
+      state.badge.style.display = 'block';
+      state.hidden = false;
+    }
   }
 
   function findGameWindow(root) {
@@ -98,19 +130,26 @@
       seen.add(view);
 
       try {
-        if (view.__hkLazyStats) return view;
+        if (
+          view.__hkLazyStats &&
+          view.__hkUnityInstance &&
+          view.__hkUnityInstance.Module
+        ) {
+          return view;
+        }
       } catch (_) {}
 
       let count = 0;
+
       try {
         count = view.frames.length;
       } catch (_) {
         return null;
       }
 
-      for (let i = 0; i < count; i += 1) {
+      for (let index = 0; index < count; index += 1) {
         try {
-          const found = visit(view.frames[i], depth + 1);
+          const found = visit(view.frames[index], depth + 1);
           if (found) return found;
         } catch (_) {}
       }
@@ -127,706 +166,793 @@
     while (Date.now() - started < timeoutMs) {
       const found = findGameWindow(window);
       if (found) return found;
+
       await new Promise(resolve => setTimeout(resolve, 250));
     }
 
     return null;
   }
 
-  function installXhrObserver(gameWindow) {
-    const proto = gameWindow.XMLHttpRequest &&
-      gameWindow.XMLHttpRequest.prototype;
-
-    if (!proto) {
-      throw new Error('Could not access game XMLHttpRequest');
-    }
-
-    if (proto.__hkNeighborV2Observed) return;
-
-    const originalOpen = proto.open;
-    const originalSend = proto.send;
-
-    proto.open = function (method, url, async) {
-      this.__hkNeighborV2Meta = {
-        method: String(method || ''),
-        url: String(url || ''),
-        async: async !== false
-      };
-
-      return originalOpen.apply(this, arguments);
-    };
-
-    proto.send = function () {
-      const meta = this.__hkNeighborV2Meta;
-      const started = performance.now();
-
-      try {
-        return originalSend.apply(this, arguments);
-      } finally {
-        if (
-          meta &&
-          meta.async === false &&
-          /\/hk\.data\.part\d+(?:[?#]|$)/.test(meta.url)
-        ) {
-          state.xhrLog.push({
-            time: Date.now(),
-            part: parsePartNumber(meta.url),
-            url: meta.url,
-            ms: performance.now() - started,
-            status: Number(this.status || 0)
-          });
-        }
-      }
-    };
-
-    proto.__hkNeighborV2Observed = true;
-
-    state.xhrRestore = function () {
-      try {
-        proto.open = originalOpen;
-        proto.send = originalSend;
-        delete proto.__hkNeighborV2Observed;
-      } catch (_) {}
-    };
-  }
-
-  function installLastFileHook(stats) {
-    const descriptor =
-      Object.getOwnPropertyDescriptor(stats, 'lastFile');
-
-    if (descriptor && descriptor.configurable === false) {
-      return;
-    }
-
-    let value = stats.lastFile || '';
-
-    Object.defineProperty(stats, 'lastFile', {
-      configurable: true,
-      enumerable: true,
-
-      get() {
-        return value;
-      },
-
-      set(next) {
-        value = next;
-
-        if (!state.map || state.armed) return;
-
-        const base = String(next || '').split('/').pop();
-        const scene = state.resourceToScene.get(base);
-
-        if (scene) {
-          state.currentInput.value = scene;
-          populateTargets(scene);
-        }
-      }
-    });
-
-    state.lastFileRestore = function () {
-      try {
-        Object.defineProperty(stats, 'lastFile', {
-          configurable: true,
-          enumerable: true,
-          writable: true,
-          value
-        });
-      } catch (_) {}
-    };
-  }
-
-  function createPanel() {
-    const panel = document.createElement('div');
-
-    panel.id = '__hk_neighbor_preload_test_v2_panel';
-    panel.style.cssText = [
-      'position:fixed',
-      'z-index:2147483647',
-      'right:10px',
-      'top:10px',
-      'width:min(390px,calc(100vw - 20px))',
-      'max-height:calc(100vh - 20px)',
-      'overflow:auto',
-      'box-sizing:border-box',
-      'padding:14px',
-      'border-radius:12px',
-      'border:1px solid rgba(255,255,255,.18)',
-      'background:rgba(13,13,21,.97)',
-      'color:#fff',
-      'font:13px/1.4 system-ui,-apple-system,sans-serif',
-      'box-shadow:0 10px 34px rgba(0,0,0,.5)'
-    ].join(';');
-
-    panel.innerHTML = `
-      <div style="font-size:17px;font-weight:800">
-        HK preload benchmark v2
-      </div>
-
-      <div style="opacity:.62;font-size:11px;margin:2px 0 10px">
-        ${VERSION} · test-only · production unchanged
-      </div>
-
-      <div id="__hk_v2_status"
-           style="padding:9px;border-radius:8px;background:rgba(255,255,255,.09);
-                  margin-bottom:10px">
-        Starting…
-      </div>
-
-      <label style="display:block;font-weight:700;margin:7px 0 4px">
-        Current room
-      </label>
-
-      <input id="__hk_v2_current"
-             list="__hk_v2_scenes"
-             placeholder="e.g. Town"
-             autocomplete="off"
-             spellcheck="false"
-             style="width:100%;box-sizing:border-box;padding:9px;
-                    border-radius:8px;border:1px solid rgba(255,255,255,.2);
-                    background:#22222d;color:#fff;font:inherit">
-
-      <datalist id="__hk_v2_scenes"></datalist>
-
-      <label style="display:block;font-weight:700;margin:9px 0 4px">
-        Target neighboring room
-      </label>
-
-      <select id="__hk_v2_target"
-              style="width:100%;box-sizing:border-box;padding:9px;
-                     border-radius:8px;border:1px solid rgba(255,255,255,.2);
-                     background:#22222d;color:#fff;font:inherit">
-        <option value="">Choose current room first</option>
-      </select>
-
-      <button id="__hk_v2_preload_arm"
-              style="width:100%;margin-top:10px;padding:11px;border:0;
-                     border-radius:8px;font:inherit;font-weight:800">
-        PRELOAD TARGET + ARM TEST
-      </button>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px">
-        <button id="__hk_v2_finish"
-                style="padding:10px;border:0;border-radius:8px;font:inherit;
-                       font-weight:750">
-          FINISH TRANSITION
-        </button>
-
-        <button id="__hk_v2_reset"
-                style="padding:10px;border:0;border-radius:8px;font:inherit">
-          Reset test
-        </button>
-      </div>
-
-      <div id="__hk_v2_result"
-           style="margin-top:10px;padding:10px;border-radius:8px;
-                  background:rgba(255,255,255,.07);white-space:pre-wrap">
-        No test armed.
-      </div>
-
-      <div id="__hk_v2_live"
-           style="margin-top:8px;opacity:.7;font-size:11px;white-space:pre-wrap">
-      </div>
-
-      <div style="margin-top:9px;opacity:.52;font-size:10px">
-        Use an unvisited target in a fresh browser session when possible.
-        If the target chunks were already cached, this test can still measure
-        transition blocking, but it cannot prove how much preload improved it.
-      </div>
-    `;
-
-    document.documentElement.appendChild(panel);
-
-    state.panel = panel;
-    state.currentInput = panel.querySelector('#__hk_v2_current');
-    state.targetSelect = panel.querySelector('#__hk_v2_target');
-    state.status = panel.querySelector('#__hk_v2_status');
-    state.result = panel.querySelector('#__hk_v2_result');
-    state.live = panel.querySelector('#__hk_v2_live');
-    state.datalist = panel.querySelector('#__hk_v2_scenes');
-
-    state.currentInput.addEventListener('input', () => {
-      const scene = state.currentInput.value.trim();
-      if (state.map && state.map.scenes[scene]) {
-        populateTargets(scene);
-      }
-    });
-
-    panel.querySelector('#__hk_v2_preload_arm')
-      .addEventListener('click', preloadAndArm);
-
-    panel.querySelector('#__hk_v2_finish')
-      .addEventListener('click', finishTransition);
-
-    panel.querySelector('#__hk_v2_reset')
-      .addEventListener('click', resetTest);
-  }
-
-  function showPanel() {
-    if (state.panel) {
-      state.panel.style.display = 'block';
-    }
-  }
-
-  function populateTargets(sceneName) {
-    if (!state.map || !state.map.scenes) return;
-
-    const record = state.map.scenes[sceneName];
-    state.targetSelect.innerHTML = '';
-
-    if (!record) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'Unknown room';
-      state.targetSelect.appendChild(option);
-      return;
-    }
-
-    const neighbors = Array.isArray(record.neighbors)
-      ? record.neighbors
-      : [];
-
-    if (!neighbors.length) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No mapped neighbors';
-      state.targetSelect.appendChild(option);
-      return;
-    }
-
-    for (const neighbor of neighbors) {
-      const target = state.map.scenes[neighbor];
-      const chunks =
-        target && Array.isArray(target.directPreloadChunks)
-          ? target.directPreloadChunks
-          : [];
-
-      const option = document.createElement('option');
-      option.value = neighbor;
-      option.textContent =
-        neighbor +
-        ' (' + chunks.length + ' mapped chunk' +
-        (chunks.length === 1 ? '' : 's') + ')';
-
-      state.targetSelect.appendChild(option);
-    }
-  }
-
   async function loadMap() {
-    setStatus('Loading room/chunk map…');
+    setBadge(
+      'HK auto preload: loading map…',
+      VERSION
+    );
 
     const response = await fetch(
-      MAP_URL + '?v2=' + Date.now(),
+      MAP_URL + '?auto=' + Date.now(),
       { cache: 'no-store' }
     );
 
     if (!response.ok) {
-      throw new Error('Map HTTP ' + response.status);
+      throw new Error(
+        'preload map HTTP ' + response.status
+      );
     }
 
     const map = await response.json();
 
-    if (!map || !map.scenes) {
-      throw new Error('Room/chunk map is malformed');
+    if (
+      !map ||
+      !map._meta ||
+      !map.scenes ||
+      typeof map.scenes !== 'object'
+    ) {
+      throw new Error('preload map is malformed');
     }
 
     state.map = map;
-    state.sceneNames = Object.keys(map.scenes).sort();
-
     state.resourceToScene.clear();
 
-    for (const sceneName of state.sceneNames) {
-      const rec = map.scenes[sceneName];
+    for (const [sceneName, record] of Object.entries(map.scenes)) {
+      if (record && record.resourceFile) {
+        const base =
+          String(record.resourceFile).split('/').pop();
 
-      if (rec && rec.resourceFile) {
         state.resourceToScene.set(
-          String(rec.resourceFile).split('/').pop(),
+          base,
           sceneName
         );
       }
     }
-
-    state.datalist.innerHTML =
-      state.sceneNames
-        .map(name => `<option value="${String(name).replaceAll('"', '&quot;')}"></option>`)
-        .join('');
   }
 
-  async function attachGame() {
-    setStatus('Looking for the running Hollow Knight instance…');
-
-    const gameWindow = await waitForGameWindow(60000);
-
-    if (!gameWindow) {
-      throw new Error(
-        'Running Hollow Knight instance not found'
-      );
-    }
-
-    state.gameWindow = gameWindow;
-    state.stats = gameWindow.__hkLazyStats;
-
-    installXhrObserver(gameWindow);
-    installLastFileHook(state.stats);
-
-    const currentLastFile =
-      String(state.stats.lastFile || '').split('/').pop();
-
-    const detected =
-      state.resourceToScene.get(currentLastFile);
-
-    if (detected) {
-      state.currentInput.value = detected;
-      populateTargets(detected);
-    }
-
-    setStatus(
-      'Attached. Choose current room + target, then press PRELOAD TARGET + ARM TEST.'
-    );
+  function getSceneRecord(sceneName) {
+    return (
+      state.map &&
+      state.map.scenes &&
+      state.map.scenes[sceneName]
+    ) || null;
   }
 
-  function getTargetChunks(targetScene) {
-    const rec = state.map.scenes[targetScene];
+  function cancelWarmQueue() {
+    state.warmGeneration += 1;
 
-    if (
-      !rec ||
-      !Array.isArray(rec.directPreloadChunks)
-    ) {
-      throw new Error(
-        'No mapped chunks for target ' + targetScene
-      );
-    }
-
-    return Array.from(
-      new Set(
-        rec.directPreloadChunks
-          .map(Number)
-          .filter(
-            n => Number.isInteger(n) && n >= 1 && n <= 208
-          )
-      )
-    );
-  }
-
-  async function warmChunk(part, signal) {
-    const url = CHUNK_BASE + part;
-    const started = performance.now();
-
-    const response = await fetch(url, {
-      cache: 'force-cache',
-      signal
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        'HTTP ' + response.status + ' for part ' + part
-      );
-    }
-
-    let body = await response.arrayBuffer();
-    const bytes = body.byteLength;
-    body = null;
-
-    return {
-      part,
-      bytes,
-      ms: performance.now() - started
-    };
-  }
-
-  function describeWarmState(measurements) {
-    if (!measurements.length) return 'unknown';
-
-    const times = measurements
-      .map(item => item.ms)
-      .slice()
-      .sort((a, b) => a - b);
-
-    const median = times[Math.floor(times.length / 2)];
-
-    if (median <= 60) {
-      return 'probably already browser-cached';
-    }
-
-    if (median >= 180) {
-      return 'network-like / probably not already browser-cached';
-    }
-
-    return 'uncertain cache state';
-  }
-
-  async function preloadAndArm() {
-    if (state.running) return;
-
-    if (state.armed) {
-      setResult(
-        'A transition test is already armed. Finish or reset it first.'
-      );
-      return;
-    }
-
-    const current = state.currentInput.value.trim();
-    const target = state.targetSelect.value;
-
-    if (!state.map.scenes[current]) {
-      setResult('Choose a valid current room.');
-      return;
-    }
-
-    if (!target || !state.map.scenes[target]) {
-      setResult('Choose a valid neighboring target room.');
-      return;
-    }
-
-    let chunks;
-
-    try {
-      chunks = getTargetChunks(target);
-    } catch (error) {
-      setResult(error.message);
-      return;
-    }
-
-    state.running = true;
-    state.warmController = new AbortController();
-    state.warmMeasurements.clear();
-    state.targetChunks = chunks.slice();
-    state.mode = 'preloaded';
-    state.routeLabel = current + ' → ' + target;
-
-    const measurements = [];
-    let totalBytes = 0;
-
-    try {
-      for (let i = 0; i < chunks.length; i += 1) {
-        const part = chunks[i];
-
-        setResult(
-          'Preloading ' + state.routeLabel + '\n' +
-          'Part ' + part + ' · ' + (i + 1) + ' / ' + chunks.length
-        );
-
-        const measurement = await warmChunk(
-          part,
-          state.warmController.signal
-        );
-
-        measurements.push(measurement);
-        totalBytes += measurement.bytes;
-        state.warmMeasurements.set(part, measurement);
-      }
-
-      const totalWarmMs = measurements.reduce(
-        (sum, item) => sum + item.ms,
-        0
-      );
-
-      const avgWarmMs =
-        measurements.length
-          ? totalWarmMs / measurements.length
-          : 0;
-
-      const cacheDescription =
-        describeWarmState(measurements);
-
-      state.baselineStats = getStatsSnapshot();
-      state.baselineXhrIndex = state.xhrLog.length;
-      state.armed = true;
-
-      setStatus(
-        'TEST ARMED. Enter ' + target +
-        ', wait until the room is playable, then press FINISH TRANSITION.'
-      );
-
-      setResult(
-        'PRELOAD COMPLETE\n' +
-        state.routeLabel + '\n' +
-        'Mapped chunks: ' + chunks.join(', ') + '\n' +
-        'Fetched: ' + fmtMiB(totalBytes) + ' MiB\n' +
-        'Average warm fetch: ' + Math.round(avgWarmMs) + ' ms/chunk\n' +
-        'Cache indication: ' + cacheDescription + '\n\n' +
-        'Now enter ' + target + '.'
-      );
-
-    } catch (error) {
-      setResult(
-        'Preload failed: ' +
-        (error && error.message ? error.message : String(error))
-      );
-
-      state.targetChunks = [];
-      state.warmMeasurements.clear();
-      state.mode = '';
-      state.routeLabel = '';
-    } finally {
-      state.running = false;
-      state.warmController = null;
-    }
-  }
-
-  function finishTransition() {
-    if (!state.armed || !state.baselineStats) {
-      setResult(
-        'No transition test is armed. Press PRELOAD TARGET + ARM TEST first.'
-      );
-      return;
-    }
-
-    const after = getStatsSnapshot();
-    const delta = statDelta(
-      after,
-      state.baselineStats
-    );
-
-    const requests =
-      state.xhrLog.slice(state.baselineXhrIndex);
-
-    const partRequests =
-      requests.filter(item => Number.isInteger(item.part));
-
-    const requestedParts =
-      Array.from(
-        new Set(partRequests.map(item => item.part))
-      );
-
-    const targetSet =
-      new Set(state.targetChunks);
-
-    const mappedRequested =
-      requestedParts.filter(part => targetSet.has(part));
-
-    const extraRequested =
-      requestedParts.filter(part => !targetSet.has(part));
-
-    let mappedSyncMs = 0;
-    let extraSyncMs = 0;
-
-    for (const req of partRequests) {
-      if (targetSet.has(req.part)) {
-        mappedSyncMs += req.ms;
-      } else {
-        extraSyncMs += req.ms;
-      }
-    }
-
-    let approximateAvoidedMs = 0;
-
-    for (const req of partRequests) {
-      if (!targetSet.has(req.part)) continue;
-
-      const warm = state.warmMeasurements.get(req.part);
-
-      if (warm) {
-        approximateAvoidedMs += Math.max(
-          0,
-          warm.ms - req.ms
-        );
-      }
-    }
-
-    let verdict;
-
-    if (delta.blockedMs <= 3000) {
-      verdict = 'GOOD: transition blocking is under 3 s.';
-    } else if (delta.blockedMs <= 7000) {
-      verdict = 'PARTIAL: improved enough to be usable, but still above the ideal.';
-    } else {
-      verdict = 'INCOMPLETE: too much blocking remains; more dependencies must be preloaded.';
-    }
-
-    const cacheNote =
-      describeWarmState(
-        Array.from(state.warmMeasurements.values())
-      );
-
-    setStatus(
-      'Test finished. Reset before testing another route.'
-    );
-
-    setResult(
-      'RESULT — ' + state.routeLabel + '\n\n' +
-      'Transition delta:\n' +
-      '  sync loads: +' + delta.loads + '\n' +
-      '  sync bytes: +' + fmtMiB(delta.bytes) + ' MiB\n' +
-      '  blocked: +' + fmtSec(delta.blockedMs) + ' s\n\n' +
-
-      'Observed synchronous chunk requests:\n' +
-      '  unique parts: ' +
-      (requestedParts.length ? requestedParts.join(', ') : '(none observed)') +
-      '\n' +
-      '  mapped target parts reused: ' +
-      mappedRequested.length + ' / ' + state.targetChunks.length +
-      '\n' +
-      '  extra/unmapped parts: ' +
-      (extraRequested.length ? extraRequested.join(', ') : '(none)') +
-      '\n\n' +
-
-      'XHR wait inside transition:\n' +
-      '  mapped target parts: ' + fmtSec(mappedSyncMs) + ' s\n' +
-      '  extra parts: ' + fmtSec(extraSyncMs) + ' s\n\n' +
-
-      'Preload cache indication: ' + cacheNote + '\n' +
-      'Approx. network wait avoided on mapped parts: ' +
-      fmtSec(approximateAvoidedMs) + ' s\n\n' +
-
-      verdict + '\n\n' +
-
-      'Important: if preload cache indication says "probably already browser-cached", ' +
-      'this run cannot prove the preload caused the speedup. Use an unvisited room ' +
-      'in a fresh/private browser session for the cleanest comparison.'
-    );
-
-    state.armed = false;
-  }
-
-  function resetTest() {
     if (state.warmController) {
       try {
         state.warmController.abort();
       } catch (_) {}
     }
 
-    state.armed = false;
-    state.running = false;
-    state.mode = '';
-    state.routeLabel = '';
-    state.baselineStats = null;
-    state.baselineXhrIndex = state.xhrLog.length;
-    state.targetChunks = [];
-    state.warmMeasurements.clear();
-
-    setStatus(
-      'Reset. Choose the actual current room and a neighboring target.'
-    );
-
-    setResult('No test armed.');
+    state.warmController = null;
+    state.activeWarmParts.clear();
   }
 
-  function updateLive() {
-    if (!state.live || !state.stats) return;
+  function orderedNeighborParts(sceneName) {
+    const record = getSceneRecord(sceneName);
 
-    state.live.textContent =
-      'Cumulative LazyFS (reference only):\n' +
-      'sync loads: ' + Number(state.stats.syncPartLoads || 0) + '\n' +
-      'sync bytes: ' + fmtMiB(state.stats.syncBytes || 0) + ' MiB\n' +
-      'blocked: ' + fmtSec(state.stats.syncBlockedMs || 0) + ' s\n' +
-      'RAM cache: ' + fmtMiB(state.stats.cacheBytes || 0) +
-      ' / ' + fmtMiB(state.stats.cacheLimit || 0) + ' MiB\n' +
-      'last outer file: ' + (state.stats.lastFile || '(none)');
+    if (!record) return [];
+
+    const neighbors = Array.isArray(record.neighbors)
+      ? record.neighbors
+      : [];
+
+    const seen = new Set();
+    const parts = [];
+
+    for (const neighbor of neighbors) {
+      const target = getSceneRecord(neighbor);
+
+      if (
+        !target ||
+        !Array.isArray(target.directPreloadChunks)
+      ) {
+        continue;
+      }
+
+      for (const rawPart of target.directPreloadChunks) {
+        const part = Number(rawPart);
+
+        if (
+          !Number.isInteger(part) ||
+          part < 1 ||
+          part > PART_COUNT ||
+          seen.has(part)
+        ) {
+          continue;
+        }
+
+        seen.add(part);
+        parts.push(part);
+      }
+    }
+
+    return parts;
+  }
+
+  async function warmPart(part, signal) {
+    const response = await fetch(
+      CHUNK_BASE + part,
+      {
+        cache: 'force-cache',
+        signal
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        'part ' +
+        part +
+        ' HTTP ' +
+        response.status
+      );
+    }
+
+    let body = await response.arrayBuffer();
+    body = null;
+  }
+
+  async function warmNeighbors(sceneName) {
+    cancelWarmQueue();
+
+    const generation = state.warmGeneration;
+    const parts = orderedNeighborParts(sceneName);
+
+    if (!parts.length) {
+      setBadge(
+        'HK auto preload: ready',
+        sceneName + ' · no mapped neighbor chunks'
+      );
+      return;
+    }
+
+    const pending = parts.filter(
+      part => !state.warmedParts.has(part)
+    );
+
+    if (!pending.length) {
+      setBadge(
+        'HK auto preload: ready',
+        sceneName +
+        ' · ' +
+        parts.length +
+        ' neighbor chunks already warmed'
+      );
+      return;
+    }
+
+    const controller = new AbortController();
+    state.warmController = controller;
+
+    let nextIndex = 0;
+    let completed = 0;
+
+    setBadge(
+      'HK auto preload: warming neighbors',
+      sceneName +
+      ' · 0 / ' +
+      pending.length +
+      ' chunks'
+    );
+
+    async function worker() {
+      while (
+        generation === state.warmGeneration &&
+        !controller.signal.aborted
+      ) {
+        const index = nextIndex;
+        nextIndex += 1;
+
+        if (index >= pending.length) return;
+
+        const part = pending[index];
+
+        state.activeWarmParts.add(part);
+
+        try {
+          await warmPart(
+            part,
+            controller.signal
+          );
+
+          if (
+            generation !== state.warmGeneration ||
+            controller.signal.aborted
+          ) {
+            return;
+          }
+
+          state.warmedParts.add(part);
+          completed += 1;
+
+          setBadge(
+            'HK auto preload: warming neighbors',
+            sceneName +
+            ' · ' +
+            completed +
+            ' / ' +
+            pending.length +
+            ' chunks'
+          );
+
+        } catch (error) {
+          if (
+            controller.signal.aborted ||
+            generation !== state.warmGeneration
+          ) {
+            return;
+          }
+
+          console.warn(
+            'HK auto preload part failed:',
+            part,
+            error
+          );
+
+        } finally {
+          state.activeWarmParts.delete(part);
+        }
+      }
+    }
+
+    const workers = [];
+
+    for (
+      let index = 0;
+      index < Math.min(
+        PRELOAD_CONCURRENCY,
+        pending.length
+      );
+      index += 1
+    ) {
+      workers.push(worker());
+    }
+
+    await Promise.all(workers);
+
+    if (
+      generation !== state.warmGeneration ||
+      controller.signal.aborted
+    ) {
+      return;
+    }
+
+    state.warmController = null;
+
+    setBadge(
+      'HK auto preload: ready',
+      sceneName +
+      ' · warmed ' +
+      completed +
+      ' new chunk' +
+      (completed === 1 ? '' : 's')
+    );
+  }
+
+  function setCurrentScene(sceneName, source) {
+    if (!getSceneRecord(sceneName)) return false;
+
+    const changed =
+      state.currentScene !== sceneName;
+
+    state.currentScene = sceneName;
+    state.currentSource = source || '';
+    state.detectedAt = performance.now();
+
+    state.recentDataReads.length = 0;
+    state.candidateScene = '';
+    state.candidateHits = 0;
+
+    if (changed) {
+      setBadge(
+        'HK auto preload: detected ' + sceneName,
+        source || 'room detected'
+      );
+
+      warmNeighbors(sceneName).catch(error => {
+        console.warn(
+          'HK auto preload queue failed:',
+          error
+        );
+
+        setBadge(
+          'HK auto preload: preload error',
+          errorText(error)
+        );
+      });
+    }
+
+    return true;
+  }
+
+  function installLastFileHook(stats) {
+    const descriptor =
+      Object.getOwnPropertyDescriptor(
+        stats,
+        'lastFile'
+      );
+
+    if (
+      descriptor &&
+      descriptor.configurable === false
+    ) {
+      return;
+    }
+
+    let currentValue = stats.lastFile || '';
+
+    Object.defineProperty(
+      stats,
+      'lastFile',
+      {
+        configurable: true,
+        enumerable: true,
+
+        get() {
+          return currentValue;
+        },
+
+        set(value) {
+          currentValue = value;
+
+          const base =
+            String(value || '')
+              .split('/')
+              .pop();
+
+          const scene =
+            state.resourceToScene.get(base);
+
+          if (scene) {
+            setCurrentScene(
+              scene,
+              'exact: ' + base
+            );
+          }
+        }
+      }
+    );
+
+    state.lastFileRestore = () => {
+      try {
+        Object.defineProperty(
+          stats,
+          'lastFile',
+          {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: currentValue
+          }
+        );
+      } catch (_) {}
+    };
+
+    const initialBase =
+      String(currentValue || '')
+        .split('/')
+        .pop();
+
+    const initialScene =
+      state.resourceToScene.get(initialBase);
+
+    if (initialScene) {
+      setCurrentScene(
+        initialScene,
+        'exact: ' + initialBase
+      );
+    }
+  }
+
+  function partsForDataRange(position, length) {
+    if (
+      !state.map ||
+      !state.map._meta ||
+      !Number.isFinite(position) ||
+      !Number.isFinite(length) ||
+      length <= 0
+    ) {
+      return [];
+    }
+
+    const dataOffset =
+      Number(
+        state.map._meta.dataUnity3dOuterOffset
+      );
+
+    if (!Number.isFinite(dataOffset)) {
+      return [];
+    }
+
+    const absoluteStart =
+      dataOffset + position;
+
+    const absoluteEnd =
+      absoluteStart + length;
+
+    const first =
+      Math.floor(
+        absoluteStart / PART_SIZE
+      ) + 1;
+
+    const last =
+      Math.floor(
+        (absoluteEnd - 1) / PART_SIZE
+      ) + 1;
+
+    const parts = [];
+
+    for (
+      let part = first;
+      part <= last;
+      part += 1
+    ) {
+      if (
+        part >= 1 &&
+        part <= PART_COUNT
+      ) {
+        parts.push(part);
+      }
+    }
+
+    return parts;
+  }
+
+  function recordDataRead(position, length) {
+    if (!state.currentScene) return;
+
+    const parts =
+      partsForDataRange(
+        Number(position),
+        Number(length)
+      );
+
+    if (!parts.length) return;
+
+    const now = performance.now();
+
+    state.recentDataReads.push({
+      time: now,
+      parts
+    });
+
+    const cutoff =
+      now - RECENT_READ_WINDOW_MS;
+
+    while (
+      state.recentDataReads.length &&
+      state.recentDataReads[0].time < cutoff
+    ) {
+      state.recentDataReads.shift();
+    }
+
+    scheduleInference();
+  }
+
+  function recentReadParts() {
+    const result = new Set();
+    const now = performance.now();
+    const cutoff =
+      now - RECENT_READ_WINDOW_MS;
+
+    for (const item of state.recentDataReads) {
+      if (item.time < cutoff) continue;
+
+      for (const part of item.parts) {
+        result.add(part);
+      }
+    }
+
+    return result;
+  }
+
+  function inferNeighborScene() {
+    if (
+      !state.currentScene ||
+      !state.map
+    ) {
+      return;
+    }
+
+    const current =
+      getSceneRecord(
+        state.currentScene
+      );
+
+    if (
+      !current ||
+      !Array.isArray(current.neighbors) ||
+      !current.neighbors.length
+    ) {
+      return;
+    }
+
+    const observed =
+      recentReadParts();
+
+    if (!observed.size) return;
+
+    const currentParts =
+      new Set(
+        Array.isArray(current.dataUnity3dChunks)
+          ? current.dataUnity3dChunks.map(Number)
+          : []
+      );
+
+    const scored = [];
+
+    for (const neighbor of current.neighbors) {
+      const record =
+        getSceneRecord(neighbor);
+
+      if (
+        !record ||
+        !Array.isArray(
+          record.dataUnity3dChunks
+        )
+      ) {
+        continue;
+      }
+
+      const targetParts =
+        new Set(
+          record.dataUnity3dChunks.map(Number)
+        );
+
+      let overlap = 0;
+      let evidence = 0;
+
+      for (const part of observed) {
+        if (!targetParts.has(part)) continue;
+
+        overlap += 1;
+
+        if (!currentParts.has(part)) {
+          evidence += 1;
+        }
+      }
+
+      const score =
+        evidence * 5 + overlap;
+
+      if (score > 0) {
+        scored.push({
+          scene: neighbor,
+          score,
+          evidence,
+          overlap
+        });
+      }
+    }
+
+    if (!scored.length) return;
+
+    scored.sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.evidence - a.evidence ||
+        b.overlap - a.overlap
+    );
+
+    const best = scored[0];
+    const second = scored[1];
+
+    const sufficientlyDistinct =
+      best.evidence >= 1 ||
+      best.overlap >= 2;
+
+    const sufficientlyAhead =
+      !second ||
+      best.score >= second.score + 2;
+
+    if (
+      !sufficientlyDistinct ||
+      !sufficientlyAhead
+    ) {
+      return;
+    }
+
+    if (
+      state.candidateScene ===
+      best.scene
+    ) {
+      state.candidateHits += 1;
+    } else {
+      state.candidateScene =
+        best.scene;
+      state.candidateHits = 1;
+    }
+
+    if (
+      state.candidateHits >= 2
+    ) {
+      setCurrentScene(
+        best.scene,
+        'inferred from data.unity3d reads'
+      );
+    }
+  }
+
+  function scheduleInference() {
+    if (state.candidateTimer) {
+      clearTimeout(
+        state.candidateTimer
+      );
+    }
+
+    state.candidateTimer =
+      setTimeout(
+        () => {
+          state.candidateTimer = null;
+          inferNeighborScene();
+        },
+        220
+      );
+  }
+
+  function installDataReadHook() {
+    const FS = state.FS;
+
+    if (
+      !FS ||
+      typeof FS.lookupPath !== 'function'
+    ) {
+      throw new Error(
+        'Emscripten FS unavailable'
+      );
+    }
+
+    let node = null;
+
+    for (const path of [
+      'data.unity3d',
+      '/data.unity3d'
+    ]) {
+      try {
+        node =
+          FS.lookupPath(path).node;
+
+        if (node) break;
+      } catch (_) {}
+    }
+
+    if (
+      !node ||
+      !node.stream_ops
+    ) {
+      throw new Error(
+        'data.unity3d virtual node not found'
+      );
+    }
+
+    const ops = node.stream_ops;
+    const originalRead = ops.read;
+    const originalMmap = ops.mmap;
+
+    if (
+      typeof originalRead !== 'function'
+    ) {
+      throw new Error(
+        'data.unity3d read hook unavailable'
+      );
+    }
+
+    ops.read = function (
+      stream,
+      buffer,
+      offset,
+      length,
+      position
+    ) {
+      try {
+        recordDataRead(
+          position,
+          length
+        );
+      } catch (_) {}
+
+      return originalRead.apply(
+        this,
+        arguments
+      );
+    };
+
+    if (
+      typeof originalMmap === 'function'
+    ) {
+      ops.mmap = function (
+        stream,
+        buffer,
+        address,
+        length,
+        position
+      ) {
+        try {
+          recordDataRead(
+            position,
+            length
+          );
+        } catch (_) {}
+
+        return originalMmap.apply(
+          this,
+          arguments
+        );
+      };
+    }
+
+    state.dataReadRestore = () => {
+      try {
+        ops.read = originalRead;
+
+        if (
+          typeof originalMmap ===
+          'function'
+        ) {
+          ops.mmap = originalMmap;
+        }
+      } catch (_) {}
+    };
+  }
+
+  async function attachGame() {
+    setBadge(
+      'HK auto preload: waiting for game…',
+      VERSION
+    );
+
+    const gameWindow =
+      await waitForGameWindow(120000);
+
+    if (!gameWindow) {
+      throw new Error(
+        'running Hollow Knight instance not found'
+      );
+    }
+
+    state.gameWindow = gameWindow;
+    state.instance =
+      gameWindow.__hkUnityInstance;
+    state.module =
+      state.instance.Module;
+    state.FS =
+      state.module.__FS;
+    state.stats =
+      gameWindow.__hkLazyStats;
+
+    installLastFileHook(
+      state.stats
+    );
+
+    installDataReadHook();
+
+    if (!state.currentScene) {
+      setBadge(
+        'HK auto preload: ON',
+        'waiting for first room detection'
+      );
+    }
   }
 
   function cleanup() {
-    try {
-      if (state.warmController) state.warmController.abort();
-    } catch (_) {}
+    cancelWarmQueue();
 
-    if (state.liveTimer) {
-      clearInterval(state.liveTimer);
-      state.liveTimer = null;
-    }
+    if (state.candidateTimer) {
+      clearTimeout(
+        state.candidateTimer
+      );
 
-    if (state.xhrRestore) {
-      state.xhrRestore();
-      state.xhrRestore = null;
+      state.candidateTimer = null;
     }
 
     if (state.lastFileRestore) {
@@ -834,41 +960,55 @@
       state.lastFileRestore = null;
     }
 
-    if (state.panel) {
-      state.panel.remove();
-      state.panel = null;
+    if (state.dataReadRestore) {
+      state.dataReadRestore();
+      state.dataReadRestore = null;
     }
 
-    delete window.__hkNeighborPreloadTestV2;
+    if (state.badge) {
+      state.badge.remove();
+      state.badge = null;
+      state.badgeMain = null;
+      state.badgeSub = null;
+    }
+
+    delete window.__hkAutoNeighborPreloadTest;
   }
 
-  window.__hkNeighborPreloadTestV2 = {
+  window.__hkAutoNeighborPreloadTest = {
     version: VERSION,
     state,
-    show: showPanel,
-    reset: resetTest,
+
+    show() {
+      showBadge();
+    },
+
     cleanup
   };
 
   async function start() {
-    createPanel();
+    createBadge();
 
     try {
       await loadMap();
       await attachGame();
 
-      state.liveTimer = setInterval(
-        updateLive,
-        500
+      if (state.currentScene) {
+        setBadge(
+          'HK auto preload: ON',
+          state.currentScene
+        );
+      }
+
+    } catch (error) {
+      console.error(
+        'HK auto preload failed:',
+        error
       );
 
-      updateLive();
-    } catch (error) {
-      console.error(error);
-
-      setStatus(
-        'Unable to start benchmark: ' +
-        (error && error.message ? error.message : String(error))
+      setBadge(
+        'HK auto preload: ERROR',
+        errorText(error)
       );
     }
   }
