@@ -1,0 +1,3844 @@
+blevel0
+Tutorial_01M
+PRoom_Q
+Fungus_Shaman(
+ty/Ruins
+?AHive
+/PRuins
+cHiveKn
+FungusExpl
+sharedassets0.resourc=!
+Abyss-01
+habyss 
+habyss i
+The Hive
+Waterways
+THE FADING TOWN
+s.GetOwner
+`GetOwn
+DEEPNEST
+Waterwaysl
+_Abyss0
+ABYSSOUTSKIRT;+
+isitedHive
+[ABYSS
+DEEPNEST,
+OHIVEt
+WATERWAYS
+GetOwner
+pDeepnest0(.
+`GetOwn
+`GetOwn
+WATERWAYS
+nFungus
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+GetOwner\
+GetOwner|	[
+`GetOwn
+WATERWAYS
+OHIVE,
+GetOwner
+quakeLevel0
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+GetOwner
+Hive Check 
+GetOwner
+GetOwner
+s.PlayMaker.Actions.GetOwner
+opAbyssd
+`GetOwns
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+GetOwner
+, 4=Splatter, 5=RuinsWa
+nAbyss 
+Abyss Check
+_ABYSS
+, 4=Splatter, 5=RuinsWa
+GetOwner,
+, 4=Splatter, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+Crossroads_1
+SURoom_A
+town_bench
+town_layered_0027_10
+GetOwner
+GetOwner
+`GetOwn
+`GetOwn
+Room_Town_Stag
+GetOwner
+[ABYSS`
+jFUNGUSx
+ROYAL_GARDENS$	\RUINS0
+MR_MUSHROOM_
+Room_Wyrm$.\
+	PTown
+town_grass
+town_mine_elev_cage000
+actx-0-2048x4096-DXT5-Town-fffd51aa
+town_extra_rocku
+actx-0-2048x256-DXT5-Town_Floor_Front-0e89c881
+ouiji_room_door_ext_back
+town_layered_0021_16
+$tut_door_large_0006_TOWN`
+Cloth Anim Town
+nymmInTown
+GetOwner
+ap_set_room_c
+HutongGames.PlayMaker.Actions.GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+ruins_leverA)
+yroom_bg0
+town_grass_quatro/!	@
+roupeInTown
+GetOwner,
+Room_Wyrm$.\
+town_grass_quat	
+CLOTH_TOWN_
+oGetOwnP
+Town Talk
+\ABYSS|
+jFUNGUS
+`GetOwn]
+town_grass_quat
+PRoom_
+INTown
+oTOWN_1Pm
+GetOwner
+town_grass_quatr
+town_grass_#q
+Room_Wyrm$.\
+`GetOwn_
+Town_Stag_Sr
+_Ruins0
+GetOwner
+TownBuilding
+town_grass_du
+Actions.GetOwn
+town_grass_duj
+oupeInTown
+_RuinsL
+troupeInTown
+GetOwner<-
+`GetOwn]
+town_grass_quat!U
+`GetOwn
+`GetOwn
+Room_Ouiji<
+Crossroads_010y3op1mz
+s.GetOwner
+oGetOwn
+enedTownBuilding
+Room_temple
+kFUNGUS
+DEEPNEST
+oom_Town_
+`GetOwn
+s.GetOwner
+GetOwner
+GetOwner
+GetOwner
+$F!&D45QKGbXOlZQl]ToWNiYOjWMfZMg_Rl[Q
+]ToWNiMIdPJfn`y
+room_particle_seT
+`GetOwn
+sharedassets12.resource\
+Map FungusH
+Deepnest
+Waterways`
+YAbyssP
+Deepnest
+s.GetOwner
+Maker.Actions.GetOwner
+ailmaster_hut_01_0004_room_FG
+ail_cliff_bench_room_bits_0005_7y`
+ail_cliff_bench_room_bits_0006_a
+nail_cliff_bench_room_bits_0000_12
+nail_cliff_bench_room_bits_0001_11
+_cliff_bench_room_bits_0007_5
+nail_cliff_bench_room_bits_0011_1
+nail_cliff_bench_room_bits_0002_10
+nail_cliff_bench_room_bits_0010_2
+ail_cliff_bench_room_bits_0004_
+nail_cliff_bench_room_bits_0008_4]
+nail_cliff_bench_room_bits_0000_12
+sharedassets13.resourc
+room_bits_
+GetOwner
+R_MUSHROOM_`
+MR_MUSHROOM_s	
+`GetOwn
+`GetOwn
+sharedassets14.resource\
+room_particle_s
+`GetOwns
+`GetOwn
+`GetOwnu
+Fungus1_15
+-DXT5-Ruins_Ornaments-18d45116
+sharedassets15.resource
+ruins_clut
+`GetOwn
+`GetOwn
+room_nailsmith_bg_dark
+room_nail
+room_nailsmith_bg
+sharedassets16.resource\
+Vroom_
+room_particle_seth
+`GetOwn
+Uroom_
+Ruins1_04
+sharedassets17.resourceX
+town_idle0000
+room_shop_BG`
+s.GetOwner@|
+PRoom_
+GetOwner
+`GetOwn
+room_0022_6h
+ly_Storeroom_0016_11
+Sly_Storeroom_0010_16
+Sly_Storeroom_0009_17M
+Sly_Storeroom_0006_199
+ly_Storeroom_0002_23A
+Sly_Storeroom_0013_14}
+Store_room_fadern
+Sly_Storeroom_0026_2
+ly_Storeroom_0007_Layer-104F
+Sly_Storeroom_0027_153
+Sly_Storeroom_0015_12
+ly_Storeroom_0001_24
+ly_Storeroom_0024_4
+Sly_Storeroom_0017_10
+Sly_Storeroom_0005_20
+ly_Storeroom_0008_18A
+Sly_Storeroom_0019_8
+Sly_Storeroom_0020_75	
+Sly_Storeroom_0004_21q
+Sly_Storeroom_0018_9
+Sly_Storeroom_0021_7
+Sly_Storeroom_0025_3
+Sly_Storeroom_0014_13%
+Sly_Storeroom_0012_15!1"
+sharedassets18.resourceP
+Storeroom_0001_24*
+`GetOwn
+oGetOwn
+sharedassets19.resourced
+crossroads_p@
+[RUINSl
+`GetOwn
+Room_Final_Boss_Atrium@ 
+HutongGames.PlayMaker.Actions.GetOwner
+ArchiveEn4
+room_ruin_house_FG
+sharedassets20.resourceT
+room_ruin_house_FG
+`GetOwnJ
+o_RUINS
+-DXT5-Deepnest-3e3a266dq
+sharedassets21.resourced
+deepnest_fog_02
+Troom_
+`GetOwn
+`GetOwn
+Deepnest_42
+sharedassets22.resourceh
+dMTroom_
+`GetOwn
+sharedassets23.resourceX
+fungus_fog
+GetOwner
+fungus_blue_fog8
+croom_p
+s.GetOwner
+GetOwner
+Abyss_03_b
+Room_temple
+Abyss_03_b
+Fungus Base Spikyb
+room_particle_se@
+GetOwner
+Crossroads_46
+Room_temple
+room_particle_)
+utongGames.PlayMaker.Actions.GetOwnerH-
+croom_pm
+OTownD
+Room_temple
+sactx-0-4096x2048-DXT5-Hive-25a486af
+H-rroom_BG
+, 4=Splatter, 5=RuinsWa
+form_fungus
+Fungus Top Sh_Generic
+hive_beam_glow`
+`GetOwn-
+jFUNGUS
+, 5=RuinsWa
+sharedassets28.resourceT
+Troom_
+HutongGames.PlayMaker.Actions.GetOwner
+kABYSS
+OHIVE`
+~Room_Ou
+[ABYSS
+DEEPNEST,
+WATERWAYS
+PTown	
+sharedassets29.resourceT
+room_0000_Layer-1
+Jinn_room_0004_2 (6)
+HutongGames.PlayMaker.Actions.GetOwner
+sharedassets30.resource\
+cd_room_beam_glowvP
+deepnest_fog_02 (4)@
+`GetOwnq
+`GetOwn
+ruins_rest{
+\MSTown 
+cuedDeepnest
+GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+eRoom_C
+`GetOwn2
+GetOwner
+`GetOwn6
+`GetOwn
+, 5=RuinsWa
+, 5=RuinsWa
+deepnest_fog^<
+deepnest_fog_0
+d_room_beam_glow 
+`GetOwn~
+, 5=RuinsWa
+GetOwner 
+Room_Wyrm$.\
+s.GetOwner
+`GetOwn
+[ABYSS
+jFUNGUS(%
+\RUINS
+HutongGames.PlayMaker.Actions.GetOwner
+URoom_
+cuedDeepnest
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+TLevel0
+sharedassets33.resource\
+s.GetOwner,
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+Ruins Sentry Fatx
+, 5=RuinsWa
+GetOwner
+, 4=Splatter, 5=RuinsWa
+deepnest_fog
+deepnest_fog_0xP
+`GetOwn~
+, 5=RuinsWa
+`GetOwn4
+Room_Wyrm$.\
+`GetOwn4
+[ABYSS\
+jFUNGUS
+\RUINSlj
+`GetOwn
+GetOwnerb
+URoom_
+HutongGames.PlayMaker.Actions.GetOwn
+TLevel0
+`GetOwn
+sharedassets34.resource\
+ushroom_br
+hive_zombie_death
+, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwn
+`GetOwn
+utongGames.PlayMaker.Actions.GetOwner
+deepnest_fog
+deepnest_fog_02P'
+d_room_beam_glow p
+`GetOwn~
+, 5=RuinsWa
+Room_Wyrm$.\
+`GetOwn\
+utongGames.PlayMaker.Actions.GetOwner
+WABYSS4
+[RUINSl
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwnL
+URoom_
+utongGames.PlayMaker.Actions.GetOwnerh
+`GetOwn
+`GetOwn
+TLevel0
+`GetOwn
+Room_Colosseum_01
+ons.GetOwnW
+cd_room_beam_glow (4
+deepnest_fog
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+Maker.Actions.GetOwner
+Fungus_drip
+ruins_resting_extra_bits_0021_v1
+GetOwner`
+ArchiveEn
+Fungus1_26
+!actx-0-2048x1024-DXT5-Crossroads_Well-0b39d01e
+sharedassets37.resourc
+town_grave_crossd
+Fungus Base
+HutongGames.PlayMaker.Actions.GetOwner
+qRoom_te&/
+jFUNGUST
+[RUINSl
+Room_Wyrm$.\
+Fungus Base Fancie1#
+GetOwner
+Room_temple
+crossroads_false_door_0003_1
+-DXT5-Crossroads_Eggs-aa4bd684
+crossroads_false_door_0002_2
+crossroads_false_door_0000_4
+crossroads_false_door_0001_3
+crossroads_03_mask
+sactx-0-2048x1024-DXT5-Crossroads_Tollbooth-79116fa2
+crossroads_03_maskH
+Fungus Base Fancy
+GetOwnerp
+etOwner,
+jFUNGUS
+[RUINSl
+`GetOwn~
+sharedassets40.resource
+crossroads_particlesH
+Fungus Bas@
+HutongGames.PlayMaker.Actions.GetOwner
+s.GetOwner
+pRoom_te
+[ABYSS$
+jFUNGUS
+[RUINSl
+pRoom_te
+Room_ruinhouse
+town_grave_c
+HutongGames.PlayMaker.Actions.GetOwner
+-DXT5-Crossroads_Witch_doctor-82c453cc
+crossroads_p
+Fungus Top Sh_Generic 1p
+Fungus Top Sh_Generic;
+pRoom_te0I
+sharedassets43.resource
+crossroads_pd
+GetOwnerP
+[ABYSS
+jFUNGUStj
+#s.GetOwner
+s.GetOwn
+Fungus Top Scarab8
+crossroads_particles
+`GetOwnu
+GetOwner
+Crossroads_18
+TLevel0
+GetOwnerh5
+GetOwner
+cd_room_BG_0
+{room_BG
+`GetOwn
+toreroom_shrunkM
+ruins_struts_spikeH
+storeroom_shrunkV
+Fungus Bas@
+GetOwner
+Room_temple
+Room_Wyrm$.\
+Crossroads_06g
+, 5=RuinsWa
+`GetOwn?
+HutongGames.PlayMaker.Actions.GetOwner 
+`GetOwn
+ticle_Fungus_Steam
+sharedassets50.resource\
+`GetOwn
+TLevel0
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+XLevel8
+sharedassets51.resourceL
+GetOwner
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+Crossroads_33
+GetOwner
+, 5=RuinsWa
+, 5=RuinsWa
+`GetOwnl
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+Crossroads_08p
+ruins_resting_extra_bits_0058_Layer-160
+ruins_resting_extra_bits_0058
+`GetOwn
+GetOwner
+[ABYSS 
+jFUNGUS\8
+\RUINSP
+GetOwnerx"
+GetOwner
+, 5=RuinsWa
+	Particle_Mushroom_ChunksLB
+mushroom_chunks_0003_a_particle
+ushroom_walk_through_2
+sharedassets56.resource`
+room_break
+Fungus Base Mushroom
+jFUNGUSP
+[RUINSl
+sharedassets57.resourceX
+Fungus Bas@
+GetOwner
+`GetOwnd	
+Fungus Base
+Fungus Base Fanciest
+ons.GetOwner
+Crossroads_21_b
+`GetOwn
+GetOwner
+, 5=RuinsWa
+deepnest_blur_hive
+deepnest_blur_hive
+deepnest_blur_hive
+wfungus_
+crossroads_particl
+deepnest_blur_h0O
+GetOwner
+, 5=RuinsWa
+GetOwnerl
+WATERWAYS
+Room_Wyrm$.\
+s.GetOwner,
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+GetOwner
+crossroads_p
+GetOwner
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+Crossroads_36
+Fungus Base Scarab`
+jFUNGUS$
+OYAL_GARDENSX'[RUINSl
+, 5=RuinsWa
+sharedassets62.resourceX
+crossroads_p
+GetOwner`
+Crossroads_08,
+=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+Crossroads_27X
+sharedassets64.resourc
+town_grave_cross_bits_01_0009_Color-Balance-1-copy-18
+, 4=Splatter, 5=RuinsWa
+Fungus_Steam
+, 5=RuinsWa
+WABYSS4
+jFUNGUS
+[RUINSl
+Fungus3_264g?op18
+Fungus Bas@
+GetOwnerd
+, 5=RuinsWa
+Crossroads_49 
+sharedassets68.resourceT
+utongGames.PlayMaker.Actions.GetOwner
+GetOwnerx@
+Room_Wyrm$.\
+Room_Wyrm$.\
+Room_Wyrm$.\
+Room_Wyrm$.\
+Crossroads_10
+Room_Wyrm$.\
+GetOwner,
+Room_Wyrm$.\
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+Fungus Base
+`GetOwnN
+Fungus Base
+GetOwner
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+crossroads_p
+Fungus Base Scarab
+, 5=RuinsWa
+GetOwner
+, 5=RuinsWa
+room_beam_glow (2)@
+town_grave_c
+Fungus Base Spiky0
+GetOwner
+[ABYSS
+jFUNGUS,
+Crossroads_19\
+Ruins Lift9
+, 4=Splatter, 5=RuinsWa
+`GetOwn6
+crossroads_p
+GetOwner
+Crossroads_27
+utongGames.PlayMaker.Actions.GetOwner@
+GetOwner
+s.GetOwnu
+Room_Tram@ 
+room_BG
+room_BG_0000_Color-Balance-1-copy-4
+sharedassets76.resourceI
+room_BG|
+GetOwner
+`GetOwn~
+jFUNGUSp
+`GetOwnY
+Deepnest_26_bN
+WATERWAYS
+Room_Wyrm$.\
+utongGames.PlayMaker.Actions.GetOwner
+HutongGames.PlayMaker.Actions.GetOwn
+, 5=RuinsWa
+GetOwner
+sharedassets77.resourceT
+Fungus Base S
+utongGames.PlayMaker.Actions.GetOwner|
+pRoom_teh!
+`GetOwn
+PRoom_W
+jFUNGUS
+~RUINS1
+utongGames.PlayMaker.Actions.GetOwn
+Crossroads_03@
+GetOwner
+ruins_lever0000
+ruins_big_lift_arrive 
+sharedassets79.resource`
+ruins_leveru
+Crossroads_49
+Crossroads_37
+ruins_gate_v02
+Ruins_gate_0000_a
+Ruins_gate_0006_aM
+	-DXT5-Ruins-c83cc335
+Ruins_gate_0003_a
+Ruins_gate_0005_ae
+Ruins_gate_0001_a
+-DXT5-Ruins-c83cc335=
+Ruins_gate_0002_a
+Ruins_gate_0000_a"
+s.GetOwner
+Fungus2_07
+sharedassets62.	
+sharedassets81.resourceT
+GetOwner,
+Room_Wyrm$.\
+fungus_blue_fog (14)@
+jFUNGUS
+\RUINShU
+GetOwner
+sharedassets82.resourceX
+TLevel0
+`GetOwn
+Crossroads_184
+ruins_clu
+Ruins_Houses_0003_1fg
+Ruins_Houses_0004_1b
+Ruins_Great_Shield_Sentry_attack_02
+sharedassets83.resourcel
+d_room_
+waterways_drips 
+etOwner
+`GetOwn
+Ruins2_04
+Ruins_Houses_0002_2fg
+Ruins_Houses_0005_2bg
+sharedassets84.resource\
+Ruins_Houses_0005_2bg| o
+ruins_clutter_
+Troom_H
+s.GetOwner
+ sactx-0-1024x512-DXT5-Ruins2_Door_Open-41ffa5e3i!
+ruins_red_cush_0002_a
+ruins_red_cush_0000_a
+sactx-0-512x1024-DXT5-Ruins_BGs-a5d6f28f
+ruins_red_FG_cushions_0000_v
+ruins_red__0005_b
+ruins_red__0018_a
+Ruins_Houses_0001_3fgU
+sharedassets85.resource5]
+Ruins_Houses_outside_doors_0002_Layer-1F
+room_particle_set_follow
+s.GetOwnerP
+GetOwner
+GetOwner
+elev_room_balcony
+deepnest_spider_pieces_0010_a
+deepnest_spider_pieces_0011_a
+ruins_bg_building_mid
+lev_room_house_bg-(
+deepnest_spider_pieces_0012_a
+ruins_lift_spikes0000^3
+sharedassets86.resourceX
+Elev_room_house_bg
+room_balcon
+HutongGames.PlayMaker.Actions.GetOwner
+ruins_window_rai
+`GetOwn1
+Room_Wyrm$.\
+GetOwner
+RUINS_MARISSA_POSTER
+ruins_window_rai
+utongGames.PlayMaker.Actions.GetOwner
+Room_Wyrm$.\
+ruins_red__0017_a
+ruins_red__0013_a-'"M
+ruins_red__0015_ai
+ruins_additions_0026_a
+-DXT5-Ruins_BG-ec818dde
+ruins_additions_0019_a
+ruins2_banner2
+GetOwner`
+[ABYSS$
+jFUNGUSL#
+ruins_window_rai_
+ruins_window_rai
+[ABYSS 
+kFUNGUSHD
+\RUINS
+GetOwner
+ruins_window_rain^4
+ruins_additions_0036_a
+ruins_additions_0038_a
+sharedassets88.resource`
+Ruins_Zombi
+utongGames.PlayMaker.Actions.GetOwner
+Fungus_drips
+HutongGames.PlayMaker.Actions.GetOwner
+Ruins Sentry
+\ABYSS(
+jFUNGUSH$
+fungus_blue_fogx
+ruins_cords_0000_a 5
+utongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+Ruins Sentry
+s.GetOwner
+GetOwner
+quirrelRuins
+~Archive;
+ruins_layered_0008_L
+ruins_additions_0031_a	.
+ruins_additions_0040_a
+ruins_additions_0021_a
+ruins_layered_0010_L
+ruins_layered_0007_L
+ruins_additions_0004_a
+ruins_additions_0039_a
+ruins_additions_0041_a
+ruins_additions_0035_a
+$`GetOwn
+, 4=Splatter, 5=RuinsWa
+\ABYSS
+jFUNGUS
+ruins_window_rai
+\ABYSS
+jFUNGUS
+GetOwner
+Room_Wyrm$.\
+GetOwner
+ruins_window_raiB
+`GetOwn
+RUINS_SENTRYl
+Ruins1_05c`
+sharedassets91.resourceX
+Fungus M
+PetOwnp
+RUINS_SENTRYd
+Ruins1_03
+&rRuins_F
+Fungus Bas-mNarabpN'
+deepnest_sp
+Ruins Lift 1=N
+deepnest_spider_pieces_0010_a
+Fungus Bx
+`GetOwn
+vTRuins
+GetOwner
+s.GetOwner
+GetOwner
+waterways_manhole_open0005Y, -
+waterways_manhole_open0001I
+waterways_manhole_open0004
+room_light
+waterways_manhole_open0000
+sharedassets93.resourceT
+>croom_lm
+Ruins_Rain (2)
+waterways_drips FG
+Ruins Gate 1
+s.GetOwner
+ruins_window_rai
+HutongGames.PlayMaker.Actions.GetOwner
+ruins_window_rain
+RuinsLift$
+[ABYSS F
+jFUNGUS
+RUINS|
+ruins_additions_0038_a 1 (1)
+utongGames.PlayMaker.Actions.GetOwner
+GetOwnert
+Ruins Sentry Fat
+`GetOwnv
+WABYSS4
+jFUNGUSH.
+\RUINS 	
+GetOwner
+Room_Wyrm$.\
+`GetOwn
+`GetOwn
+GetOwner
+Ruins1_05
+Ruins Flying Lance Zombie Cln
+Ruins1_17
+Fungus_drips
+ruins_window_rain
+GetOwner
+WATERWAYS
+ruins_window_ra
+toreroom_masks
+ruins_dark pillar
+-DXT5-Ruins_mid_extras-90429fd7
+ruins_additions_0030_a
+storeroom_maskss
+GetOwner
+Room_Wyrm$.\
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+GetOwner
+GetOwner
+, 4=Splatter, 5=RuinsWa
+ruins_fogf
+ruins_window_rainH
+`GetOwn
+Waterways
+`GetOwnu
+ruins_core_wall_09 (6)
+deepnest_spB
+ruins_window_rainX
+[ABYSS
+jFUNGUS@=
+\RUINS
+GetOwner
+ruins_window_
+`GetOwn
+GetOwner
+ruins_window_
+ruins_window_rainL
+WABYSS4
+[RUINSl
+ruins_window_rai
+`GetOwn
+utongGames.PlayMaker.Actions.GetOwner
+ruins_additions_0035_aC
+`GetOwn
+`GetOwn'
+GetOwner
+ruins_layered_0000_L
+age_lord_room_0003_floor_wingi
+ruins_roofs_0001_a
+	sharedassets101.resource
+GetOwner,
+Ruins1_24_boss
+Room_temple
+ruins_window_rain
+utongGames.PlayMaker.Actions.GetOwnerh
+XLevel0Q
+Ruins1_32
+ge_lord_room_0002_floor
+	sharedassets102.resource(
+room_0002_floop
+utongGames.PlayMaker.Actions.GetOwner
+age_lord_room_0003_floor_wing}
+`Ruins_
+`GetOwn
+deepnest_spf
+ruins_window_rain@
+utongGames.PlayMaker.Actions.GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+ruins_window_
+ruins_window_ra
+ruins_window_rain?
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner
+Ruins1_30
+ruins_resting_extra_bits_0044_Layer-146
+ruins_additions_0005_a
+sharedassets105.resourcee
+GetOwner
+TLevel0
+ruins_window_rainX
+GetOwner 	
+GetOwner
+RUINS_FOUNTAI
+, 5=RuinsWa
+, 5=RuinsWa
+Ruins2_01_b
+store_room_0003
+store_room_0001_a
+tore_room_0000_ap
+Fungus Topo
+	town_grave_cross_bits_01>
+`GetOwn
+1qRuinsWa
+\ABYSSp4
+jFUNGUS
+GetOwner 
+Room_Wyrm$.\
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+Ruins1_29
+oRuins1
+"oRuins1
+RUINS_1`u
+PRoom_
+Room_Town_f
+Abyss_2
+Deepnest
+eRuins1
+oRUINS1
+`GetOwn
+DEEPNEST
+HutongGames.PlayMaker.Actions.GetOwner
+oRuins1
+Deepnest \
+oRuins24#
+Ruins1_28
+sharedassets108.resource(
+GetOwner$
+Waterways0
+Deepnestt
+oGetOwn\
+PRuins
+_RUINS_1tB
+Ruins1_31b
+	sharedassets109.resource(
+GetOwner0
+`GetOwn}
+`GetOwn.
+dGetOwn
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+RUINS_SHAMAN_1x$[
+ruins_additions_0038_a
+`GetOwn
+`GetOwn
+s.GetOwner
+s.GetOwnerl
+`GetOwn
+`GetOwn
+`GetOwnH
+s.GetOwn
+`GetOwn
+`GetOwno
+Room_Wyrm$.\
+!actx-0-512x1024-DXT5-Ruins_Elev_Broken-78d178ec
+Ruins_sign
+GetOwner
+GetOwner`
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+Ruins2_03b
+ruins_break_window_back&
+ruins_mage_building_0009_a
+PRuinsY
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+ruins_fancy_shelf
+ruins_resting_extra_bits_0045_Layer-147
+	sharedassets113.resource(
+fungus_blue_f
+TLevel0
+GetOwner
+Room_Wyrm$.\
+RuinsLift$
+GetOwner
+GetOwner
+deepnest_spr
+ruins_red__0018_a (19)
+waterways_dri
+fungus_blue_fog8
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+GetOwner
+Ruins2_03
+	sharedassets115.resource(
+GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+Ruins_Houses_outside_doors_0001_Layer-3
+ruins_resting_extra_bits_0083_Layer-185
+Ruins_Houses_outside_doors_
+Fungus Base ScarabP
+`GetOwn
+`GetOwn2
+[ABYSS
+jFUNGUS
+`GetOwn
+qRoom_te
+GetOwner
+RUINS_SENTRY`
+ruins_red__0020_e-
+deepnest_sp
+ruins_re@
+deepnest_spider_pieces
+GetOwner
+PRuins
+GetOwner
+PRuins
+GetOwner,
+Room_Wyrm$.\
+`GetOwn
+Ruins2_09P
+	sharedassets118.resource
+Fungus Top Scarab<
+Fungus_drips
+Ruins_Rain 2
+town_grave_cross
+\ABYSS`i
+BjFUNGUS
+[RUINSl
+[ABYSS`
+jFUNGUSx
+[RUINSl
+GetOwner
+GetOwner
+WABYSS4
+jFUNGUS$
+/[RUINSl
+Ruins_gate
+room_beam_glow
+waterways_drips FG
+Ruins_gatek
+`room_bD
+TLevel0
+Ruins2_07_r
+Deepnest_East_03
+ruins_resting_extra_bits_0093_Layer-193
+ruins_resting_extra_bits_0094_Layer-194
+utongGames.PlayMaker.Actions.GetOwner
+kFUNGUS
+DEEPNEST
+TAG_TOWN
+gFungus!
+oFUNGUS
+oRUINS1
+DEEPNEST0
+PRoom_
+Room_Town_f
+Abyss_22@
+Deepnest
+eRuins2
+pRoom_teD4
+Room_templeH
+oGetOwn
+"oRuins2
+RUINS_2`u
+Room_Wyrm$.\
+Ruins2_06
+ruins_red__0014_a
+ruins_red__0011_c
+ruins_red__0004_b
+ruins_red__0006_b	1
+ruins_red__0016_a5
+ruins_red__0002_bP
+crossroads_03_mask
+GetOwner
+GetOwner
+GetOwner
+(eTRuins?
+`GetOwn
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+pFungus 
+Crossroads_49Hf
+-DXT5-Abyss_Descent-37f6cc98
+abyss_scaffold
+Fungus Base Scarab
+uruins_rD
+ruins_window_rain 
+, 4=Splatter, 5=RuinsWa
+Crossroads_49Hf
+	sharedassets124.resource(
+deepnest_fog_0
+fungus_blue
+deepnest_fog_02 (5)
+fungus_blue
+`GetOwn
+[ABYSSX
+jFUNGUS
+\RUINS
+TLevel0
+Ruins2_11_bossL|7
+Crossroads_10X
+Ruins_Houses_0000_door_glow(
+waterways_drips
+ruins_core_wall_01 (89)@
+deepnest_fog_0g
+waterways_drips FG
+jABYSS
+jFUNGUS
+[RUINSl
+sharedassets126.resource(
+s.GetOwn
+GetOwner
+ruins_breakable_watcher_statue_0004
+fungus_blue_fog
+Ruins Trophy Large (8
+fungus_blue_fod
+HutongGames.PlayMaker.Actions.GetOwner
+ruins_window_rai]
+dQqruins_wNZL_rai
+s.GetOwner8
+`GetOwn
+ruins_window_rainT
+`GetOwn
+sharedassets128.resource(
+zombie_fungus_ay
+GetOwner
+Fungus_drip
+ruins_resting_extra_bits_0020_v2
+Fungus Stone Variant
+, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+GetOwner
+jFUNGUS
+Fungus1_01b4
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner
+GetOwner
+GetOwner
+Maker.Actions.GetOwner
+	sharedassets130.resource(
+Fungus_St
+Fungus_simple_pole
+Fungus1_02
+HutongGames.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+abyss__0003_b-copy-6
+)E`abyss_
+Fungus_St
+Fungus_drip
+@townj
+Fungus1_03
+GetOwner
+, 5=RuinsWa
+GetOwner
+, 5=RuinsWa
+GetOwner
+GetOwner
+Fungus1_05
+Fungus_Fat_pole (h
+HutongGames.PlayMaker.Actions.GetOwner,
+Fungus1_04_boss
+Room_Wyrm$.\
+, 5=RuinsWa
+, 5=RuinsWa
+sharedassets133.resource(
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+Fungus Base Variant@
+utongGames.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwner
+Fungus Stone Variant
+HutongGames.PlayMaker.Actions.GetOwner
+Fungus Zombie 
+, 5=RuinsWa
+`GetOwnA:
+Fungus1_07
+Fungus_Fat_pole
+Fungus_Steam@
+utongGames.PlayMaker.Actions.GetOwnerhm
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+GetOwnerH	
+, 5=RuinsWa
+sharedassets137.resource(
+`GetOwn
+ons.GetOwner
+GetOwner,
+sharedassets138.resource(
+ombie Hive Cln8
+s.GetOwner
+Fungus ExplodeFUNGUS
+ombie Hive Cr
+`GetOwn
+s.GetOwn
+Fungus1_09_b
+GetOwnerp
+Fungus1_30
+Fungus_Fat_pole
+`GetOwn
+GetOwner
+`GetOwn
+Room_Wyrm$.\
+, 4=Splatter, 5=RuinsWa
+Fungus1_19`
+fungus
+, 5=RuinsWa
+GetOwner
+Fungus_Fat_pole (
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+[ABYSS
+jFUNGUS@+
+HutongGames.PlayMaker.Actions.GetOwn
+, 4=Splatter, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwn
+Room_Wyrm$.\
+, 4=Splatter, 5=RuinsWa
+Fungus1_29`
+GetOwner
+GetOwner
+, 5=RuinsWa
+Fungus1_29
+`GetOwn
+, 5=RuinsWa
+[ABYSS
+jFUNGUS
+`GetOwnI
+	sharedassets143.resource(
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+s.GetOwn
+Fungus1_14_b
+Room_Wyrm$.\
+, 5=RuinsWa
+, 5=RuinsWa
+Fungus1_05t
+Room_temple
+Deepnest_26_bN
+WATERWAYSKEY
+Room_Wyrm$.\
+Fungus1_09
+`GetOwnN
+Fungus1_16
+`GetOwn
+PRoom_
+om_Town_6
+Fungus3_40
+oRUINS1
+Room_templeH
+Fungus1_22
+utongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+Fungus Base Variant@
+utongGames.PlayMaker.Actions.GetOwner
+Fungus Zombie|'
+TLevel0
+`GetOwn
+, 5=RuinsWa
+GetOwner
+GetOwner$
+Fungus_Fat_pole (3)j
+Fungus_Fat_pole (19)
+GetOwner
+sharedassets149.resource(
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+[ABYSS8(
+jFUNGUS
+\RUINS
+, 5=RuinsWa
+`GetOwn
+, 5=RuinsWa
+`GetOwn
+, 5=RuinsWa
+`GetOwn
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+[ABYSS
+jFUNGUS
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+GetOwner
+Room_Wyrm$.\
+, 4=Splatter, 5=RuinsWa
+sharedassets151.resource(
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+ruins_resting_extra_bits_0021_v1H
+Fungus_Fat_pole (11
+`GetOwn
+`GetOwn]
+s.GetOwner
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+s.GetOwner
+, 5=RuinsWa
+Room_temple
+GetOwner
+, 4=Splatter, 5=RuinsWa
+[ABYSS
+jFUNGUS
+Room_Slug_Shrine
+room_beam_glo
+`GetOwn5
+Fungus1_28_v
+, 4=Splatter, 5=RuinsWa
+Room_Wyr
+sharedassets156.resource(
+`GetOwn
+, 5=RuinsWa
+sFungus__
+HutongGames.PlayMaker.Actions.GetOwner
+Fungus Base Variant(
+Fungus_Fat_pole
+Fungus_Fat_pole (11
+abyss_0007_blue_root_07
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+Fungus_Fat_pole (8
+Vabyss
+HutongGames.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+, 5=RuinsWa
+[ABYSSp?
+jFUNGUS
+GetOwner
+GetOwner
+pRoom_te
+, 5=RuinsWa
+Fungus1_11
+fungus_stone_short_wall
+fungus_temple_backwall_small
+sharedassets161.resource(
+cd_room_beam_g
+`GetOwn
+GetOwner
+jFUNGUS
+Fungus1_36
+ruins_rest
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwnerd
+ruins_rest
+Fungus1_11
+	sharedassets164.resource(
+qFungus_,.
+HutongGames.PlayMaker.Actions.GetOwner
+Room_Wyrm$.\
+, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+Room_Wyrm$.\
+Crossroads_10
+GetOwner
+, 5=RuinsWa
+Fungus Fly
+Fungus Flyer ClnC
+Fungus Top Scarab
+	 `GetOwn'
+[ABYSS 
+jFUNGUS8
+[RUINSl
+HutongGames.PlayMaker.Actions.GetOwner
+Fungus2_03X
+ruins_res
+utongGames.PlayMaker.Actions.GetOwner
+pRoom_ted"
+oom_Town_
+DEEPNEST
+~RUINS1
+mushroom_turret_projectile_move(
+sharedassets167.resource(
+zombie_fungus_a_prepar
+bFungus(
+`GetOwnA
+hroom_Turr,
+, 4=Splatter, 5=RuinsWa
+Room_Wyr
+Fungus Flyer
+[ABYSS
+jFUNGUS
+mushroom_crawler_loop 
+sharedassets168.resource(
+ons.GetOwnerD
+ons.GetOwn
+, 5=RuinsWa
+GetOwner,
+Room_Wyrm$.\
+, 5=RuinsWa
+Mushroom_Roller_and_Mini
+Fungus_dripsR
+ruins_rest^
+utongGames.PlayMaker.Actions.GetOwner,
+hasWaterwaysKey(
+INV_NAME_WATERWAYSKEY
+Room_Wyr
+Room_Wyrm$.\
+Fungus2_06
+Fungus_Steam
+Fungus_Steam
+, 4=Splatter, 5=RuinsWa
+GetOwnerh
+, 5=RuinsWa
+[ABYSS
+jFUNGUS
+\RUINSH	
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+Fungus Flyer
+Crossroads_18
+Particle_Mushroom_Spore_Steam
+HutongGames.PlayMaker.Actions.GetOwnH
+Fungus Base Mushroom@
+Fungus Base M
+, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwnerd
+Fungus2_06
+Ruins_gate_0004_a!
+Fungus Base MX
+Ruins_gate
+Fungus Base Mushroom@
+, 4=Splatter, 5=RuinsWa
+Fungus Flyer
+, 5=RuinsWa
+	sharedassets173.resource(
+, 4=Splatter, 5=RuinsWa
+town_rest_to_tal
+`GetOwn
+, 5=RuinsWa
+ounce_shroom_BG_020000_base
+Fungus Base P
+Aruins
+`GetOwn
+`GetOwn
+WABYSS4
+[RUINSl
+, 5=RuinsWa
+`GetOwn
+, 5=RuinsWa
+GetOwner\
+, 5=RuinsWa
+Fungus Zombie Attack
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwni
+	sharedassets176.resource(
+HutongGames.PlayMaker.Actions.GetOwnerp
+Zom Hive
+fungus_blue_fog
+Fungus Base Mushroom@
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+Fungus Mushroom 02 (10)
+HutongGames.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+`GetOwn
+Fungus2_13
+, 5=RuinsWa
+GetOwner
+GetOwner
+`GetOwn
+Fungus2_14
+sharedassets178.resource(
+`GetOwn
+, 5=RuinsWa
+`GetOwn}
+`GetOwn[
+[ABYSS
+jFUNGUS
+[RUINSl
+WABYSS4
+[RUINSl
+Fungus2_14_c
+`GetOwnE
+`GetOwnQ
+.GetOwner
+GetOwner
+GetOwner
+quirrelArchiveEncou
+isitedRuins
+fungus_blue_fogx
+GetOwner
+GetOwner
+[ABYSS
+jFUNGUS
+Fungus2_15_boss
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+Fungus Mushroom 
+Room_Wyr
+_PLANT_FUNGUS_MANTIS
+Fungus Base Mushroom@
+Fungus Base Mus
+`GetOwn
+GetOwnerT
+.GetOwner,
+`GetOwn
+, 5=RuinsWa
+hroom_charm_plinth_0001_floorI_"9
+shroom_charm_plinth
+Fungus Base M
+hroom_charm_plinth
+GetOwner
+, 5=RuinsWa
+[ABYSS
+WATERWAYSKEY
+Room_Wyr
+Fungus2_19
+Rruins
+Ruins_gate_maikz
+bFUNGUS(
+`GetOwn
+Ruins1_01
+waterways_dung_bits_0004_Layer-10
+Fungus Mushroom 02 (3)P
+Fungus Base Mushroomh
+GetOwner
+\ABYSS
+jFUNGUS
+[RUINSl
+`GetOwn
+waterways%
+`GetOwn
+article_Deepnest_Glow_S
+deepnest_cornifer_mound_02hq
+deepnest_glow_mush_01_dead
+deepnest_glow_mush_04_push
+Shroom_Puff
+deepnest_glow_mush_04 (5)
+Shroom_Particll
+TLevel0
+[ABYSS
+BjFUNGUS
+\RUINS
+mapDeepnest
+`GetOwnb
+Deepnest_16
+sharedassets189.resource(
+ruins_additions_001v
+ruins_mi
+s.GetOwner
+s.GetOwnb
+GetOwner
+Fungus2_06l
+Fungus Base Mushroomp
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwnerp
+HutongGames.PlayMaker.Actions.GetOwner
+Fungus Flyer
+WABYSS4
+jFUNGUS\
+	[RUINSl
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+Room_Wyrm$.\
+HutongGames.PlayMaker.Actions.GetOwner0
+sharedassets192.resource(
+`GetOwn
+Grimmchild Level8
+Fungus Base M
+Fungus Flyer@
+GetOwner
+FUNG_SHROOM_
+`GetOwn
+GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+`GetOwn
+`GetOwn
+Room_Wyrm$.\
+Room_Wyrm$.\
+"qRuinsWa
+sharedassets194.resource(
+GetOwner
+Fungus Base h
+Fungus Base Mushroom
+Fungus Base Mushroomh
+, 4=Splatter, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwner
+Fungus1_16
+GetOwnerH
+Room_Wyrm$.\
+`GetOwn@
+Fungus_Steam@
+, 4=Splatter, 5=RuinsWa
+WABYSS4
+jFUNGUS
+	[RUINSl
+Fungus Base Scarab
+[ABYSS
+jFUNGUSL	
+[RUINSl
+oneWayArchive
+Fungus_dripsp
+Fungus_drip
+Fungus3 03
+, 5=RuinsWa
+, 5=RuinsWa
+Fungus3_34
+`GetOwn
+	 `GetOwn'
+, 4=Splatter, 5=RuinsWa
+GetOwnerl-
+`GetOwn
+ruins_resting_extra_bits_0018_v4L
+Fungus Stone Totem Al
+`GetOwn
+GetOwner
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+`GetOwn
+Fungus1_24X
+Fungus Base ScarabX
+HutongGames.PlayMaker.Actions.GetOwner8
+, 4=Splatter, 5=RuinsWa
+GetOwner
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+jFUNGUS$2
+Fungus3_11
+sharedassets203.resource(
+GetOwnerp	
+Fungus Ston0	ztem AltX
+, 4=Splatter, 5=RuinsWa
+GetOwner|
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+etOwner,
+s.GetOwner
+utongGames.PlayMaker.Actions.GetOwn
+, 4=Splatter, 5=RuinsWa
+Fungus3_08
+ruins_resting_extra_bits_0020_v2H
+`GetOwn
+Fungus3_39
+[ABYSStO
+jFUNGUS
+Fungus3_49
+ruins_rest~
+`GetOwn
+`GetOwn
+ruins_rest
+ruins_resting_extra_bits_0062_Layer-164 (4X
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+GetOwner
+[ABYSS
+jFUNGUS
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+Fungus3_22_b
+GetOwner
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwner,
+, 5=RuinsWa
+ruins_mid_windo
+`GetOwn
+Fungus3_23_boss@
+, 5=RuinsWa
+Fungus3_48h
+sharedassets209.resource(
+HutongGames.PlayMaker.Actions.GetOwner\
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+`GetOwn
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+[ABYSS ^
+gFUNGUS
+\RUINS
+`GetOwn
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+Fungus3_44
+, 5=RuinsWa
+TLevel0
+Fungus3_0L
+Fungus_Steam@
+ruins_rest
+, 4=Splatter, 5=RuinsWa
+pFungus 
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+WATERWAYS
+Room_Wyrm$.\
+, 4=Splatter, 5=RuinsWa
+[ABYSS
+jFUNGUS|
+\RUINS
+, 4=Splatter, 5=RuinsWa
+Fungus3_2705
+Fungus Base bubble
+Fungus3 27
+Room_Wyr
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+Fungus Base Var<
+Rabyss
+s.GetOwner
+Room_Wyrm$.\
+, 4=Splatter, 5=RuinsWa
+Fungus3_24P9/opM
+utongGames.PlayMaker.Actions.GetOwner
+oGetOwn
+\ABYSS
+jFUNGUS
+, 5=RuinsWa
+Fungus3_448
+sharedassets218.resource(
+HutongGames.PlayMaker.Actions.GetOwn
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwnert
+s.GetOwn
+GetOwner|	[
+Fungus3_02
+Fungus_Steam
+Fungus_drips`
+GetOwner`
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwner
+Maker.Actions.GetOwner
+GetOwner
+GetOwner
+, 5=RuinsWa
+GetOwner
+Crossroads_10 
+Fungus3_11
+ruins_rest
+Fungus_drips@
+pRoom_te
+Room_temple
+s.GetOwner`
+Fungus1_16,&
+kFUNGUS
+DEEPNEST
+PRoom_
+oom_Town_Stag
+Deepnest
+\ABYSS
+Fungus3_40_bo
+sharedassets221.resource(
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+`GetOwn
+ruins_rest
+Fungus_Steam@
+qRoom_ten9
+Fungus_Shaman
+, 5=RuinsWa
+MR_MUSHROOM_`
+`GetOwn
+ sactx-0-1024x2048-DXT5-Archive_Outside-c0fe8f444
+	-DXT5-Archive-6260d8e8
+ruins_rest>
+WayArchive
+_ARCHIVE_ENTRANCE
+ArchiveE6
+qRoom_te
+Fungus3_arch
+Fungus3_archive
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+Room_Wyr
+, 4=Splatter, 5=RuinsWa
+GetOwner|
+Fungus3 26
+, 5=RuinsWa
+ngGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+Fungus3_48_top
+`GetOwn
+Fungus3_23
+	sharedassets225.resource(
+utongGames.PlayMaker.Actions.GetOwn
+G_Waterways
+HutongGames.PlayMaker.Actions.GetOwner
+GODSEEKER_WATERWAYS_DAZED
+G_Waterways
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwn
+GetOwner
+ruins_res
+Fungus Base Spiky
+_RUINS_1 
+atmos_archives
+sharedassets227.resource
+	archive_rag
+d_room_beam_glow
+ archive_wind^
+[ABYSS8
+jFUNGUS
+[RUINSl
+Fungus3_archive_02pO=op1K
+	sharedassets228.resource
+rchive thin 1
+cd_room_beam_glow
+archive_rag (111)
+archive_rag (122)<
+HutongGames.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+RCHIVE_01
+`GetOwn
+, 5=RuinsWa
+, 5=RuinsWa
+Fungus3_archive_02
+, 5=RuinsWa
+, 5=RuinsWa
+_ARCHIVE_INTERIOR
+_ARCHIVE_INTERIOR
+, 5=RuinsWa
+, 5=RuinsWa
+ARCHIVE_03
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+ARCHIVE_02
+, 5=RuinsWa
+ungus3_archive<
+	sharedassets229.resource(
+ Gate Archive Cln@
+GetOwner
+ Gate ArchiveUW
+HutongGames.PlayMaker.Actions.GetOwner,
+Gtown^
+Deepnest_roll_rock_04 (	
+TLevel0
+`GetOwn7
+GetOwner
+jFUNGUS
+\RUINS
+GetOwner\
+Deepnest_26_bN
+WATERWAYS
+Room_Wyrm$.\
+[ABYSS
+jFUNGUSd
+[RUINSl
+GetOwner
+Deepnest_26_bN
+WATERWAYS
+Room_Wyrm$.\
+TLevel0
+GetOwner
+Stown_
+tutorial_poles
+tutorial_poles
+town_lamp_0x
+Fungus Base ScarabX
+TLevel0
+GetOwner
+jFUNGUS
+\RUINS
+Room_temple
+, 5=RuinsWa
+Room_nailmaster
+utongGames.PlayMaker.Actions.GetOwner
+store_room_0000_a 1^
+deepnest_fog
+Ttown_c1
+[ABYSS@
+jFUNGUS
+\RUINS
+`GetOwn
+PRoom_
+om_Town_6
+Fungus3_40
+oRUINS1
+abyss_0001_blue_root_1
+Rabyss<
+abyss8
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+GetOwner
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+s.GetOwner
+, 5=RuinsWa
+sharedassets235.resource(
+abyss_0002_blue_gra
+TLevel0
+GetOwner,
+Crossroads_10,
+sharedassets236.resource(
+GetOwner
+troupeInTown$
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+ruins_resting_extra_bits_0015_a
+sharedassets237.resource(
+ruins_resting_extra_bits_0000_a (1)Br
+deepnest_fog
+deepnest_fog_02d
+jFUNGUS
+\RUINS@"
+sharedassets238.resource(
+HutongGames.PlayMaker.Actions.GetOwnerx&
+HutongGames.PlayMaker.Actions.GetOwner(
+ruins_resting_extra_bits_0022_Layer-124
+ruins_resting_extra_bits_0098_Layer-198
+ruins_rest
+deepnest_fog_01 (6
+0&Ctownc"\cliff0
+Sleeps in her Archives, surrounded by fog and mist.+
+GetOwnerx
+Pdruins_F Sextra
+deepnest_fog_0
+Fungus Top ScarabX
+ruins_resting_extra_bits_0003_a
+deepnest_fog
+`GetOwn
+jFUNGUST
+deepnest_fog
+GetOwner
+`GetOwn
+RUINS_SENTRY
+Ruins2_10d
+sharedassets242.resource(
+deepnest_fog
+s.GetOwn]
+sharedassets243.resourcex
+deepnest
+ruins_resting_extra_bits_0000_a (1)
+deepnest_fog>
+WATERWAYS
+Room_Wyrm$.\
+`GetOwn
+`GetOwn
+\ABYSSlI
+jFUNGUS
+6[RUINSl
+`GetOwn
+`GetOwn-
+HutongGames.PlayMaker.Actions.GetOwn
+RUINS_SENTRY
+ruins_res
+deepnest_fog_0*
+HutongGames.PlayMaker.Actions.GetOwner
+Room_temple
+GetOwner
+STown 
+etOwner,
+oRuins1l
+oRuins2
+utongGames.PlayMaker.Actions.GetOwn
+jFUNGUS
+oRUINS2|
+DEEPNEST
+jFUNGUS
+PRoom_
+oom_Town_Stag_g
+GetOwner$
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwna
+WATERWAYS
+Room_Wyr
+TLevel0
+`GetOwnF
+GetOwner,
+Room_Wyrm$.\
+Room_Wyrm$.\
+GetOwner
+GetOwner
+	Ctown
+deepnest_fog"
+pRoom_te
+deepnest_fog_02 (5)p
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwnR
+sharedassets248.resource(
+[ABYSSdM
+jFUNGUS
+	[RUINSl
+sharedassets249.resource(
+geo_rock_extra_set_0001_abyss4
+12_hive2d
+Fungus Base Scarab 
+GetOwner
+, 5=RuinsWa
+jFUNGUSD
+\RUINS8
+GetOwner
+etOwner
+GetOwner
+`GetOwnV
+`GetOwnZ
+sharedassets251.resource(
+=Splatter, 5=RuinsWa
+room_beamx
+Ruins Gate Iron
+`GetOwn
+`GetOwn
+,irection_sign_breakable_0003_town
+utongGames.PlayMaker.Actions.GetOwner
+HutongGames.PlayMaker.Actions.GetOwn
+`GetOwn
+GetOwner
+GetOwner,
+, 4=Splatter, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwn
+, 5=RuinsWa
+.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+room_beam_glow 
+GetOwner<
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+[ABYSS
+jFUNGUS
+\RUINS
+GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner
+town_particles
+GetOwner
+~Archive
+room_beam_glowp
+GetOwner
+, 4=Splatter, 5=RuinsWa
+`GetOwnu	
+s.GetOwnQ
+room_beam_gl
+utongGames.PlayMaker.Actions.GetOwn
+`GetOwn
+sharedassets261.resource(
+GetOwner 
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner,
+GetOwner,
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+Room_Wyrm$.\
+s.GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner|	[
+town_right_cliff0
+GetOwner
+, 4=Splatter, 5=RuinsWa
+town_particle
+%utongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+GetOwner|
+`GetOwn
+Fungus Top Sh_Generic,
+Room_temple
+`GetOwn
+Room_Wyrm$.\
+, 4=Splatter, 5=RuinsWa
+cd_room_beam_glow (6
+GetOwner,
+, 5=RuinsWa
+Waterways0
+Deepnestt
+`GetOwn
+Rabyss1
+`GetOwn
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+TLevel0
+, 5=RuinsWa
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+s.GetOwner
+sFungus 
+jFUNGUS
+Fungus Explode(
+HutongGames.PlayMaker.Actions.GetOwner
+sFungus 
+room_beam_glow?
+utongGames.PlayMaker.Actions.GetOwn
+GetOwner\
+s.GetOwn
+GetOwner
+Crossroads_03
+room_0001_lit-floor_bench
+ctown_p
+d_room_beam_gi8,(1
+d_room_beam_glow
+etown_lg
+GetOwner
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+[ABYSS
+jFUNGUS,b
+[RUINSl
+, 4=Splatter, 5=RuinsWa
+[ABYSS0
+[RUINSl
+etOwner
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+GetOwner,
+Ruins Gate Iron
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner,
+GetOwner,
+`GetOwn
+Fungus Base d
+Fungus3_39D
+deepnest_cornifer_mound
+S32_DeepnestE
+Deepnest(
+White_Shroom_Puff
+hite_Shroom_Puff`
+, 4=Splatter, 5=RuinsWa
+`GetOwn6$
+`GetOwn
+[ABYSS
+jFUNGUS
+ROYAL_GARDENS|	\RUINS
+`GetOwn
+mapDeepnest
+, 5=RuinsWa
+	[RUINSl
+`GetOwn
+GetOwner
+break_wall_deepnest
+White_Shroom_B
+White_Shroom_B
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+GetOwner8
+Deepnest_36
+HutongGames.PlayMaker.Actions.GetOwn
+_Shroom_PuffL
+White_Shroom_Break_Chunks
+deepnest_stalactites (20)"
+_Shroom_Puff
+, 5=RuinsWa
+, 5=RuinsWa
+Deepnest_31
+actx-0-4096x2048-DXT5-Spider_Town_Int-4878e7fexn
+Fungus Top ScarabD
+utongGames.PlayMaker.Actions.GetOwner@#
+Room_temple
+kFUNGUS
+DEEPNEST
+oFUNGUS
+oRUINS1
+PRoom_
+Room_Town_f
+Abyss_2
+Deepnest
+`GetOwnJ
+-DXT5-Spider_Town-c90fe85f
+deepnest_spider_pieces_0027_aM
+deepnest_spider_pieces_0025_a
+deepnest_spider_pieces_0039_a
+Fungus Top Scara
+utongGames.PlayMaker.Actions.GetOwner
+Room_temple
+8__Town
+[ABYSS
+jFUNGUS
+Room_temple
+Deepnest_41
+	sharedassets283.resource(
+Shroom_Break
+deepnest_Mid_eggs_BGs (6)
+Shroom_Puff
+`GetOwn"
+CLOTH_DEEPNEST_MEET
+`GetOwnz
+`GetOwn2
+TLevel0
+Deepnest_26
+White_Shroom_Puff
+Glow_Shroom_Particles 
+Fungus_drips@
+White_Shroom_Puff
+ons.GetOwner
+`GetOwn
+GetOwner,
+Room_Wyrm$.\
+GetOwner
+deepnest_fog_02 (3)
+Glow_Shroom_Particles
+White_Shroom_Break_Chunks
+GetOwner$
+HutongGames.PlayMaker.Actions.GetOwner
+Deepnest_01bD
+sharedassets286.resource(
+deepnest_stalactites (114)
+	White_Shroom_Break_Chunk=
+ruins Lev\
+utongGames.PlayMaker.Actions.GetOwner
+jFUNGUS
+GetOwner
+deepnest26b_swM7
+jFUNGUS
+GetOwner
+GetOwner
+Deepnest_354L?op18
+Ruins Lever Remade
+hite_Shroom_Puff
+hite_Shroom_Puffn
+HutongGames.PlayMaker.Actions.GetOwner
+deepnest26b_switch
+(	 `GetOwn+
+`GetOwn
+Room_Wyrm$.\
+`GetOwn
+cd_room_beam_glow
+Glow_Shroom_Particl
+White_Shroom_B_
+ons.GetOwner(
+rn_deepnestLef]
+, 4=Splatter, 5=RuinsWa
+"QRuins
+GetOwner
+tter, 5=RuinsWa
+GetOwner
+`GetOwn
+GetOwner
+`GetOwn
+Deepnest Mechanisms Cln
+utongGames.PlayMaker.Actions.GetOwnR
+deepnest_stalactites (53)"
+GetOwner,
+Deepnest_31tLoright2
+	sharedassets291.resource(
+utongGames.PlayMaker.Actions.GetOwner,
+_Shroom_Break
+White_Shroom_B
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+_DEEPNEST_1
+GetOwner
+GetOwner
+Room_Wyrm$.\
+`GetOwn
+Fungus Base Scarab
+utongGames.PlayMaker.Actions.GetOwner,
+GetOwner
+`GetOwn
+, 5=RuinsWa
+hite_Shroom_Break 
+hite_Shroom_Break_S
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwn
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+hite_Shroom_B_
+`GetOwn-
+GetOwner
+deepnest_rubble_02 (5)
+hite_Shroom_Puffx
+deepnest_rubble_02 (3)
+hite_Shroom_Puff
+[ABYSSH?
+wjFUNGUS
+\RUINS
+Deepnest_38
+Glow_Shroom_Particles
+White_Shroom_Puff
+ons.GetOwner
+, 4=Splatter, 5=RuinsWa
+sharedassets297.resource(
+Fungus Bc
+deepnest_stalactites (63)
+_PLANT_DEEPNEST
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+, 5=RuinsWa
+, 5=RuinsWa
+`GetOwn
+s.GetOwner
+, 5=RuinsWa
+, 5=RuinsWa
+sharedassets298.resource(
+utongGames.PlayMaker.Actions.GetOwnx]
+Glow_Shroom_Particl
+GetOwner,
+GetOwner
+TLevel0
+MR_MUSHROOM_
+`GetOwn
+deepnest_spider_pieces_0002_a
+deepnest_spider_pieces_0002_a{
+GetOwner\
+`GetOwn
+`GetOwnM	
+Deepnest_41_b|
+, 5=RuinsWa
+s.GetOwnn
+_DEEPNESTd
+room_Particles
+_Shroom_Puff
+HutongGames.PlayMaker.Actions.GetOwner,
+HutongGames.PlayMaker.Actions.GetOwner<
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+Deepnest_43_b|
+, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+Deepnest_42
+Glow_Shroom_Particle
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+, 5=RuinsWa
+Deepnest_44_b|
+, 4=Splatter, 5=RuinsWa
+PetOwn
+Room_Wyrm$.\
+[ABYSS
+jFUNGUS
+Room_Wyrm$.\
+Crossroads_10
+, 5=RuinsWa
+Deepnest_39
+spider_town_bench
+s_town_int_deepnest_spider_pieces_0007_a
+s_town_crumble_floor
+_town_crumble_floor
+_deepnest+u`pieces
+P_townX
+town_bg (3)@
+_deepnest_
+cd_room_beam_b
+town_bg (37
+ons.GetOwner
+`GetOwn
+`GetOwn
+__Town
+4repnest_1a__Townl
+GetOwner(
+ons.GetOwner
+GetOwner
+_SPIDER_TOWN_0Y^
+`GetOwn
+oGetOwnlb
+GetOwner
+Room_Wyrm$.\
+hornetAbyssEncounterH
+`GetOwn
+ORNET_SPIDER_TOWN
+Deepnest_10|
+deepnest_spider_pieces_0066_a
+sharedassets305.resource(
+deepnest_spider_pieces_0036_a%
+[room_y
+`GetOwnd
+HutongGames.PlayMaker.Actions.GetOwner
+BRUMM_DEEPNEST_1
+Deepnest_10$
+article_hive 3
+actx-0-2048x1024-DXT5-Hive_Ext-81c71ff5
+	sharedassets306.resource(
+deepnest_stalactites (21)r
+Fungus Base ScarabXA
+[ABYSS
+jFUNGUSL
+[RUINSl
+MR_MUSHROOM_`
+, 4=Splatter, 5=RuinsWa
+hive_BG_02
+Fungus_Steam
+, 5=RuinsWa
+GetOwner
+Deepnest_East_02_b
+[ABYSS<4
+jFUNGUS
+[RUINSl
+`GetOwn
+, 5=RuinsWa
+Deepnest_East_03
+waterways_short_ground
+sharedassets308.resource
+`GetOwn 
+Fungus_Steam
+ruins_fencesD8
+WABYSS4
+\RUINS
+, 5=RuinsWa
+GetOwner,
+Deepnest_East_06
+sharedassets309.resource(
+Fungus_Steam@
+, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwner
+Fungus Ba"?Wcarab
+GetOwner
+GetOwner
+GetOwner
+deepnest_spider_pieces_0038_a
+deepnest_spider_pieces_0038_a
+GetOwner
+Fungus Top Scaraw4
+waterways_pipe_01
+Fungus Top Scara
+Room_Wyrm$.\
+Room_Wyrm$.\
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+GetOwner
+jFUNGUST;
+%\RUINSX
+Fungus Base Scarab
+waterways_ZC/01(9
+GetOwner0
+GetOwner,
+GetOwner
+Room_Wyrm$.\
+abyss_scaffoldx
+waterways_:0
+Deepnest_East_09_b
+`GetOwn
+GetOwnert
+`GetOwnF
+	sharedassets314.resource(
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+`GetOwnA
+pFungus '!w Scarab
+`Fungus
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+sharedassets316.resource(
+, 5=RuinsWa
+Deepnest_East_Hf
+et_fungusH
+GetOwner,
+Room_Wyr
+GetOwner
+GetOwner
+GetOwner
+Deepnest_East_14b
+GetOwner
+GetOwner,
+Room_Wyrm$.\
+Deepnest_East_06
+`GetOwn
+`GetOwn
+_abyss_fossil$L
+mr_mush_riddle_room_0000_Layer-9-copy
+r_mush_riddle_room_0002_Layer-7
+sactx-0-4096x2048-DXT5-Abyss-9dadd46d1-
+mr_mush_riddle_room_0003_Layer-8
+mr_mush_riddle_room_0001_Color-Balance-1-copy
+sactx-0-2048x1024-DXT5-Abyss_Vine-ad74d955
+Pabyss
+84_abyss
+r_mush_riddle_room_000k
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+`GetOwn
+`Fungusa
+GetOwner,
+Room_Wyrm$.\
+, 5=RuinsWa
+GetOwner
+, 5=RuinsWa
+	sharedassets324.resource(
+`GetOwna
+deepnest_corner3
+Deepnest_East_Hornet_bo
+GetOwner,
+`GetOwn
+`GetOwn
+`GetOwnn
+sharedassets326.resource(
+deepnest_fog_02'
+cd_room_beam_glow
+`GetOwn
+`GetOwn%
+[ABYSS
+jFUNGUSp
+GetOwner 
+abyss__0002_b-copy-4
+"sactx-0-512x512-DXT5-Waterways_Big_Pipe-462d0113
+abyss__0006_b-copy-12
+abyss__0008_b-copy-16
+abyss__0000_bH
+waterways_big_pipes
+Ruins_gate?
+abyss__bracket (1)
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+_PLANT_ABYSS_01
+RUINS_SENTRY
+Abyss_02$
+abyss__0001_b-copy-2M""
+`abyss_
+abyss__rope
+abyss__rop
+Fungus Base Scarab4<
+GetOwner
+Room_Wyrm$.\
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner
+, 5=RuinsWa
+Abyss_01
+cd_room_beam_glowH
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner|	[
+Room_Tram@ 
+Fungus Top ScarabP'
+Deepnest_37`
+`hive_s
+utongGames.PlayMaker.Actions.GetOwner 
+Room_Tram@ 
+Room_Tram
+Deepnest_East_01
+0155_abyss-F
+0158_abyss
+_0000_abyss_plat4C
+abyss_crawler_turn0002(
+abyss_vine1 (3)
+Ruins FossilH
+GetOwner@6G
+v_Abyss~1
+`GetOwn
+[ABYSS
+jFUNGUS
+oGetOwn0
+, 5=RuinsWa
+rn_abyss^&
+AbyssCraw
+ruins_additions_0002_a
+abyss_break_wall_palace
+_0023_abyss_02r
+ruins_addij
+abyss_shell_bottom (11p
+[RUINSl
+`GetOwn
+Abyss_22
+_0048_abyss_02
+abyss_door_seal1
+abyss_mask
+_0198_abyss
+_0050_abyss_02
+0197_abyss
+abyss_door_breakd
+room_loop
+Abyss CrawlX
+abyss_vine1 (2)
+qRuins FY
+tutorial_poles
+`GetOwn:
+isitedAbyssLow
+[ABYSS|)
+jFUNGUS
+\RUINS
+level2
+[ABYSS 
+jFUNGUS8
+[RUINSl
+Abyss_06_Core_b
+`GetOwn
+ABYSS_DOOR_NOBRAND
+ornetAbyssEncounter
+HutongGames.PlayMaker.Actions.GetOwner
+HORNET_ABYSS_
+Abyss_creature002
+abyss_blue_creatureK9
+51_abyss (19)8
+Rabyss
+Abyss_06_Core
+, 4=Splatter, 5=RuinsWa
+Room_Wyr
+Room_Wyrm$.\
+Crossroads_10
+Abyss_06_C
+Abyss_tendril_room__0004_5
+_0011_abyss_02
+_0009_abyss_02
+_0008_abyss_02
+Abyss_tendril_room__0005_6
+Abyss_tendril_room__0002_3yf
+Abyss_tendril_room__0003_4
+_0066_abyss_02
+Abyss_tendril_room__0000_1
+Abyss_tendril_room__0001_2
+abyss_tendrils_emerge
+sharedassets336.resource
+_room__0000_1
+_0064_abyss_02
+Abyss Tendrils Anim 
+, 4=Splatter, 5=RuinsWa
+4_abyss (13)8
+b_room_
+abyss_midd_shells
+qRuins FY
+GetOwnerT
+GetOwner
+sAbyss
+`GetOwn
+AbyssA{,ho
+abyssLightho
+AbyssTendril,
+GetOwnerd
+sAbyss
+s.GetOwn
+Abyss_10
+196_abyss
+abyss_midd_shells (15)2
+qRuins FY
+tutorial_poles
+`GetOwnm	
+Abyss_10
+Room_Wyr
+Abyss_09
+17_abyss_027
+Ruins Fossil8
+TLevel0
+`GetOwnA
+abyss_dream_particle
+_0044_abyss
+`GetOwn
+p/o_Abyss
+Room_Wyrm$.\
+Crossroads_10
+abyss_vine2 1 (17)
+|	qRuins FY
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+GetOwnerh
+GetOwner,
+WATERWAYS
+Room_Wyr
+oInTownl	.
+HutongGames.PlayMaker.Actions.GetOwner
+Abyss_03
+abyss_wall_spikes_simple (1N
+qRuins FY
+abyss_vine1 (149t
+Abyss_18_b
+, 4=Splatter, 5=RuinsWa
+_RUINS_1 
+_Abyss
+_ABYSS<
+, 5=RuinsWa
+Abyss_19
+infected_knight_room_0000_6
+room_shake
+room_0000_6
+n_abyssLeft
+s.GetOwner
+infected_knight_room_0004_2 (63
+abyss_shell_bottom (12
+knight_room_0004_2 (39
+_0151_abyss (238
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+GetOwner
+`GetOwn
+GetOwner,
+Room_Wyrm$.\
+HutongGames.PlayMaker.Actions.GetOwner
+, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+sharedassets344.resource(
+GetOwner
+abyss_vine2 1 (86)
+TLevel0
+GetOwnerx
+GetDarknessLevel0
+`GetOwnM
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+AbyssCrawl
+-DXT5-Abyss_Plinth-a5bfccb6
+43_abyss_02
+ruins_bg
+MR_MUSHROOM_
+Abyss_19
+abyss_vine1<
+Fungus Top Scarab
+utongGames.PlayMaker.Actions.GetOwnerdl
+kFUNGUS
+DEEPNEST
+PRoom_
+Room_Town_Stag
+YeRuins2
+pRoom_te
+RUINS_2
+[ABYSS
+jFUNGUS
+Abyss_05
+Lighthouse_Room_Interior_0007_lit_la
+ighthouse_Room_Interior_0006_8
+ighthouse_Room_Interior_0008_dark_la
+`Room_Il
+sharedassets6.
+ghthouse_Room_Interior_0002_11H
+`GetOwn
+utongGames.PlayMaker.Actions.GetOwner
+queen_room_back
+room_back@
+abyss_floor_04 (29*
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+sharedassets86.	
+waterways_black_solid
+waterways_rubbish_0002_Layer-3
+waterways_break_wall_01
+waterways_bench_sign_02
+waterways_rubbish_0003_Layer-2M
+sactx-0-1024x512-DXT5-waterways-647c47f7
+	sharedassets349.resource(
+WaterwaysFlowing
+`GetOwnA
+fungus_blue_fog (9)
+d_room_beam_glow
+fungus_blue_fog
+Rruins
+utongGames.PlayMaker.Actions.GetOwner@
+GetOwnert
+jFUNGUSX
+[RUINSl
+waterways_dung_bits_0010_Layer-16
+waterways_dung_bits_0012_Layer-18
+waterways_dung_bits_0007_Layer-13
+waterways_dung_bits_0013_Layer-19
+ruins_fences<
+`town_bYK
+d_room_beam_glow
+waterways_pipe_01 (1)
+town_bench
+d_room_beam_glow
+fungus_blue_fog
+GetOwner
+`GetOwn
+`GetOwn
+sharedassets351.resource(
+GetOwnerd
+Room_Wyrm`
+waterways_rubbish_0006_Layer-1 (11)ZO
+crossroads_N
+ruins_fog
+Room_Wyr
+waterways_sign_image#
+fungus_blue_fog (6
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+GetOwner$	1Get
+`GetOwn-
+HutongGames.PlayMaker.Actions.GetOwner
+fungus_blue_fog (4@
+ruins_fen
+fungus_blue_fog (8
+Room_Wyrm$.\
+GetOwner
+ons.GetOwnc
+waterways_dung_bits_0005_Layer-11
+%actx-0-1024x2048-DXT5-Waterways_Giant_Tank-9613f2de
+Waterways_Crank+
+sharedassets354.resource(
+waterways_giant_tank_0003_1
+cd_room_beam_glow
+Fungus_Steam
+WATERWAYS
+[ABYSS
+jFUNGUS\
+\RUINS
+GetOwner
+Room_Wyrm$.\
+Room_Wyr
+`GetOwn
+Abyss_01
+	sharedassets355.resource(
+d_room_beam_glow
+fungus_blue_fo
+`GetOwn&
+`GetOwn
+, 5=RuinsWa
+, 5=RuinsWa
+Abyss_01
+waterways_short_broken
+Fungus_Steam@
+fungus_blue^
+`GetOwn>
+Ruins Sentry Fat
+`GetOwn
+GetOwner
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+, 5=RuinsWa
+GetOwner
+qRoom_te:8
+jFUNGUS$
+waterways_rubbish_0005_Layer-6_flat
+fungus_blue_fog
+fungus_blue_fog
+fungus_blue_fo&
+utongGames.PlayMaker.Actions.GetOwner
+GetOwnert
+GetOwner
+waterways_metal_grate/
+utongGames.PlayMaker.Actions.GetOwner
+jFUNGUS,$
+GetOwner
+WATERWAYS
+_waterways.
+GetOwner,
+fungus_blue_fog
+Room_Wyrm$.\
+	sharedassets361.resource(
+<`GetOwn
+GetOwnerX
+GetOwner
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwner,
+Ruins Sentry FatxW
+[ABYSS
+jFUNGUS
+[RUINSl
+GetOwner
+, 5=RuinsWa
+WATERWAYSj
+RUINS_SENTRY4
+Waterways_07
+Fungus_Steam@
+etOwner
+WATERWAYSuD
+, 5=RuinsWa
+sharedassets364.resource(
+ruins_fog
+cd_room_b
+GetOwner
+GetOwner
+WATERWAYS
+Room_Wyr
+Waterways_05
+ig_abyss_platform_chunki
+cd_room_beam
+jFUNGUS\ 
+[RUINSl
+sharedassets366.resource(
+utongGames.PlayMaker.Actions.GetOwn
+ig_abyss_platform_chunkq
+Sabyss	
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+sharedassets367.resource(
+cd_room_b
+cd_room_beam
+[ABYSS
+jFUNGUS
+GetOwner
+`GetOwn=
+	sharedassets368.resource
+GetOwner
+cd_room_beam_glo
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+GetOwner
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+`GetOwn
+al_boss_room_0025_floor_symbol_02,
+final_boss_room_0024_floor_symbol_03
+	sharedassets373.resource(
+White_Palace_throne_room_top_0000_2
+	Breakable Wall Waterways
+oabyss 
+GetOwner
+, 4=Splatter, 5=RuinsWa
+, 5=RuinsWa
+abyss_back_mid_shellsX
+ruins_addition
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+Abyss_05
+oGetOwn
+Waterways
+cd_room_beamN
+cd_room_beam
+s.GetOwner
+, 4=Splatter, 5=RuinsWa
+cd_room_beam_glow(
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+cd_room_beam_glow
+, 4=Splatter, 5=RuinsWa
+	sharedassets380.resource
+Sabyssa
+abyss|
+`GetOwn
+GetOwner,
+final_boss_room_0011_vault_symb2
+final_boss_room_0012_vault_symb1
+final_boss_room_0011_vault_symb2-
+Rabyss
+DEEPNEST
+[RUINSl
+Pabyss
+inal_boss_room_0013_sun_symb1a
+final_boss_room_0010_sun_symb2
+sharedassets383.resourc
+_boss_room_0010_sun_symb2
+abyss_shell_bottom
+GetOwnerX
+HutongGames.PlayMaker.Actions.GetOwner
+Particle_Hive_He
+Zhive2h
+sharedassets384.resource(
+S68-04 HIVE
+Zombie Hive
+Hive_Break_01 (2)b
+hive gem base
+Fungus_drips
+Hive_Break_01
+hive gem base8
+GetOwner
+[ABYSS
+jFUNGUS
+	[RUINSl
+OMBIE_HIVE
+hive_extras_living_0016_Layer-36
+GetOwner
+Hiveling Spawner (4)P
+	hive_scenery_0033_h (14)@
+Hive_Break_Pillar (2)
+Fungus_dripsPW
+GetOwner\
+Zombie Hive$
+HutongGames.PlayMaker.Actions.GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+_PLANT_HIVE
+Hive Zombiet
+.PlayMaker.Actions.GetOwner
+OMBIE_HIVE
+	hive_scenery_0033_h (19)
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+Hive_03_bx
+GetOwner
+hive_big_roo
+%hive_roof_02_0003_Color-Balance-1-copy-3_floor (164)
+Fungus_drips
+hive_scenery_0018_h (4)
+Hive Breakable Pillar (5)H
+Fungus_dripsp5
+GetOwner\
+jFUNGUS
+[RUINSl
+HutongGames.PlayMaker.Actions.GetOwner
+Hive_03_cx
+GetOwner
+Deepnest_East_01
+Hiveling Spawner (14)
+hive_scenery_0024_h (5)@
+Fungus_dripsX}
+Hive_Break_Pillar (11)"
+`GetOwn"
+s.GetOwner`
+Hive Zombie
+Hive Zombiet
+GetOwner
+OMBIE_HIVE,
+-DXT5-Hive_Queen_Chamber-18b8f10d
+hive_spikes
+	sharedassets389.resource(
+HIVE_KNIGHT
+phive_knj
+hive_charm_plinth_0003_2 (1)r
+Fungus_dripsh
+hive_light_effect
+GetOwner
+GetOwner,
+killedHiveKnight8
+`GetOwn
+hHiveKn
+HIVE_KNIGHT
+`HiveKnd'
+sharedassets390.resource(
+Room_0001_5j
+`GetOwnR
+Room_Wyrm$.\
+Room_Wyrm$.\
+Room_Wyrm$.\
+GetOwner
+GetOwner
+GetOwner
+GetOwner
+Room_Wyrm$.\
+TLevel0
+`GetOwn
+GetOwner
+sharedassets392.resource(
+GetOwner
+`GetOwn
+`GetOwn
+sharedassets393.resourc
+GetOwner
+GetOwner
+`GetOwn
+sharedassets394.resource
+GetOwner
+aroom_bW
+`GetOwn
+`GetOwn
+ruins_struts_spike
+`GetOwn
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner
+age_lord_room_0003_floor_wing (1
+`GetOwn
+, 5=RuinsWa
+`GetOwn
+GetOwner
+abyss_wall_long
+GetOwner
+`GetOwn
+`GetOwn
+Room_Wyrm$.\
+`GetOwn
+sharedassets398.resource(
+Fungus_Steam
+`GetOwn
+GetOwner,
+sharedassets399.resource(
+utongGames.PlayMaker.Actions.GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+GetOwnerT
+`GetOwn
+GetOwner
+	sharedassets400.resource(
+deepnest
+s.GetOwner
+deepnest
+deepnest
+`GetOwn
+	sharedassets403.resource
+s.GetOwner
+pRoom_te
+Fungus Base Horned
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwnY
+`GetOwnY
+HutongGames.PlayMaker.Actions.GetOwnY
+,	[ABYSS
+jFUNGUS8
+`GetOwn
+`GetOwnY
+`GetOwnY
+`GetOwnY
+Abyss_Dream
+	sharedassets406.resource(
+_0154_abyss (2)8
+abyss_wall
+GetOwner
+KING_ABYSS_0ea
+`GetOwnl
+KING_ABYSS_03t
+Room_temple
+KING_ABYSS%
+Abyss_15
+ruins_lake_water
+sharedassets407.resource(
+ise_abyss_pit
+`GetOwn
+Abyss Pi
+raise_abyss_pit
+HutongGames.PlayMaker.Actions.GetOwner
+aise_abyss_pit8
+aise_abyss_pit
+`GetOwn
+`GetOwn
+GetOwner
+GetOwner
+final_boss_room_0000_fg_sil
+final_boss_room_0028
+inal_boss_room_0026_floor_symbol_01y
+final_boss_room_0029
+room_0023_left_door_mid
+inal_boss_room_0030
+	sharedassets408.resource(
+room_0000_fg_sil
+room_0028
+room_0023_left_d
+GetOwner
+GetOwner
+GetOwner
+pRoom_teL
+inal_boss_room_0027
+_0023_abyss_02_final_boss
+sharedassets409.resource(
+	0023_abyss_02_final_bossG
+_room_corner
+final_boss_room_0028
+3_abyss_028
+`GetOwn
+GetOwner
+`GetOwn=
+`GetOwn
+abyss particl
+TUTORIAL_CREDIT_NAME_044
+mr_mushroom_v02 AUDIO,/"D
+]Level8
+GetOwner
+`GetOwnr
+	sharedassets423.resource(
+	G_Waterways_floor_0000_2
+deepnest_stalactites (75)
+Ruins_gate_0001_a (>
+fungus_blue~
+waterways_rubbish_0005_Layer-6_flat (24P
+Fungus Flyer4
+Ruins_gateX
+Fungus Flyer AmbientC
+Room_templed7
+`GetOwnm
+WABYSS4
+[RUINSl
+GetOwner
+Actions.GetOwnq
+WATERWAYS_DAZQB
+`GetOwn
+oor_Blue_Room_Unlock
+sharedassets424.resource(
+utongGames.PlayMaker.Actions.GetOwner
+TLevel0
+`GetOwn
+Room_tem
+[ABYSSpc
+jFUNGUSX
+[RUINSl
+GG_Waterways$
+GetOwner
+`GetOwn
+_Waterways$
+l Level0
+_0198_abyss
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner
+`GetOwn
+s.GetOwner
+`GetOwn
+l Level0
+l Level0
+GetOwnerd
+Crossroads_10
+sharedassets428.resource(
+utongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+s.GetOwner
+`GetOwn
+waterways_dung_bits_0013_Layer-19m
+l Level0
+GetOwner
+`GetOwn
+l Level0
+`GetOwn
+GetOwner
+GetOwner,
+Room_Wyrm$.\
+GetOwner
+l Level0
+waterways_
+GetOwner
+l Level0
+Deepnest_Glow_Shroom_Particles (1H
+Rabyss
+GetOwner
+GetOwner
+l Level0
+TLevel0
+GetOwnerd4+
+l Level0
+Crossroads_10
+l Level0
+D  `GetOwn
+GetOwner
+Statue Level4
+e `GetOwn
+	ruins_resting_extra_bits
+l Level0
+GetOwner
+l Level0
+utongGames.PlayMaker.Actions.GetOwner
+Crossroads_10
+l Level0
+p.GetOwnR
+HutongGames.PlayMaker.Actions.GetOwnerLP
+l Level0
+HutongGames.PlayMaker.Actions.GetOwner
+GetOwner`
+l Level0
+HutongGames.PlayMaker.Actions.GetOwner
+HutongGames.PlayMaker.Actions.GetOwn
+l Level0
+GetOwner
+YLevel0
+Qhive_
+hive_roof_02_0003_Color-Balance-1-copy-3 (31)
+hive glass hex
+l Level0
+Hive Knight
+PyHIVE_KN
+HutongGames.PlayMaker.Actions.GetOwner
+HIVE_KNIGHT
+`HiveKn
+final_boss_room_0026_floor_symbol_01_large
+sharedassets447.resourc|
+final_boss_room_0026_flCs
+`GetOwna
+Uabyss
+TLevel0
+`GetOwnI
+`GetOwn
+p.GetOwnz
+l Level0
+`GetOwn
+GetOwner
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+l Level0
+GetOwner
+utongGames.PlayMaker.Actions.GetOwn
+Room_Wyr
+deepnest_stalactites (212(
+waterways_
+Room_Wyrm$.\
+Room_Wyrm$.\
+`GetOwn
+utongGames.PlayMaker.Actions.GetOwner
+ruins_resting_extra_bits_0018_v4H
+s.GetOwner
+sharedassets454.resource(
+utongGames.PlayMaker.Actions.GetOwn
+l Level0
+- `GetOwn
+`GetOwn
+eepnest_Glow_Shroom_Particles (1
+utongGames.PlayMaker.Actions.GetOwner
+GetOwnerb
+[ABYSS|
+jFUNGUS
+HutongGames.PlayMaker.Actions.GetOwner
+sharedassets457.resource(
+utongGames.PlayMaker.Actions.GetOwner
+l Level0
+GetOwner0
+utongGames.PlayMaker.Actions.GetOwner
+sharedassets458.resource(
+utongGames.PlayMaker.Actions.GetOwner
+fungus_blue_fog&
+fungus_blueF2
+utongGames.PlayMaker.Actions.GetOwner
+jFUNGUST3
+)[RUINSl
+GetOwner
+GetOwner
+G_Waterways
+Abyss Pit
+aise_abyss_pit
+utongGames.PlayMaker.Actions.GetOwner$
+aise_abyss_pitx
+Abyss Pit
+TLevel0
+ABYSS RISEt
+`GetOwn
+Abyss Pit
+^Abyss
+`GetOwnm
+	sharedassets460.resource(
+HutongGames.PlayMaker.Actions.GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+Crossroads_10
+l Level0
+ruins_clutter_0012
+`GetOwn
+l Level0
+`GetOwn
+l Level0
+DJ `GetOwn
+s.GetOwner
+GetOwnerH
+`GetOwnX
+Crossroads_10
+HutongGames.PlayMaker.Actions.GetOwner
+l Level0
+`GetOwn
+`GetOwn
+HutongGames.PlayMaker.Actions.GetOwner
+TLevel0
+`GetOwn~
+`GetOwn
+l Level0
+ `GetOwn
+GG_statues_Hive_Knight
+sharedassets470.resourc"
+qHive_Kn^
+_Room_Door
+CHALLENGE_UI_LEVEL3
+Room_Door
+vHive_Kn
+GetOwner
+`GetOwnY
+	G_LOCKED_DESC_HIVEKNIGHT
+`GetOwnY
+`GetOwnY
+`GetOwnY
+GetOwner@@
+GetOwner|&
+`GetOwna
+`GetOwna
+`GetOwna
+HutongGames.PlayMaker.Actions.GetOwner
+&tFungus 
+waterways_rubbish
+ruins_fences
+sharedassets472.resourc
+`GetOwn
+sharedassets473.resourcw
+Room_tem
+`GetOwn-
+room_orb_final_boomT
+sharedassets474.resourcX
+gg_blue_room_throb
+sharedassets474.resourceY.
+abyss_0010*
+utongGames.PlayMaker.Actions.GetOwner
+TLevel0
+TLevel0
+GetOwner8%
+`GetOwn
+TLevel0
+GetOwner
+Crossroads_10
+GS_engine_room_02
+sharedassets477.resource(
+TLevel0
+GetOwner
+l Level0
+	sharedassets480.resource(
+s.GetOwn
+TLevel0
+`GetOwn
+`GetOwn
+GetOwner
+GetOwner
+`GetOwn
+, 5=RuinsWa
+	G_Waterways_walls_0000_1
+g_waterways_0006_1)
+G_Waterways_Coffin_0001_3
+g_waterways_0002_5_gate1
+G_Waterways_Coffin_0000_4
+gg_waterways_0003_4_0
+g_waterways_0001_6
+gg_waterways_0005_2%1"
+g_waterways_0003_49
+g_waterways_0002_5
+gg_waterways_0004_3
+g_waterways_0003_4_back
+GG_Waterways_walls_0001_2
+gg_waterways_0002_5_0=
+sharedassets482.resource2
+Waterways_Coffin_0000_4.
+GG_Waterways_Coffin_0001_3 (76)
+Ruins_Rain 1P
+town_ash
+Room_temple
+[ABYSS\
+jFUNGUS
+[RUINSl
+l Level0
+GetOwnerH	
+	sharedassets485.resource(
+s.GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+l Level0
+`GetOwn
+utongGames.PlayMaker.Actions.GetOwnH
+Crossroads_10
+TLevel0
+GetOwnerd4+
+TLevel0
+$( `GetOwn
+TLevel0
+ruins_rest
+l Level0
+l Level0
+GetOwner
+Ruins Vial Full SmallV
+GetOwner0
+s.GetOwner
+o Level4P
+`GetOwn
+GetOwner0
+GetOwner0
+GetOwner
+HutongGames.PlayMaker.Actions.GetOwnerh
+utongGames.PlayMaker.Actions.GetOwn
+l Level0
+GetOwnerd
+Crossroads_10
+Deepnest_Glow_Shroom_Particles (
+utongGames.PlayMaker.Actions.GetOwner
+GetOwner "
+, 4=Splatter, 5=RuinsWa
+Tabyss
+town_ashW
+`GetOwn
+Crossroads_
+OHive4
+oTown_d
+abyss smoke =k
+h__0000_hive_break
+wispy_smoke_particle_abyss
+ABYSS_DEEP
+CROSSROADS_INFQ
+FUNGUS_SHAMANB
+PABYSS`
+WATERWAYS">
+abysses
+WATERWAYS">Voi
+RABYSS
+RUINS_SHAMAN_1
+DEEPNEST'%
+DTOWNf
+R_MUSHROOM_
+*ELDERBUG_CROSSROADS_INFECTED">Ehhh...A sharp sickly smell
+ town. I
+WATERWAYS_WHITE
+UI_LEVEL1
+$RROOM_
+MR_MUSHROOM_DREAMB
+KING_ABYSS_04">g
+DEEPNEST
+OHIVEP
+oHive cg
+MAP_DEEPNEST
+QAbyss
+* name="ELDERBUG_TOWN_GREET_4">
+!ABYSS_FINAL_A">Sigillerai l
+MR_MUSHROOM_
+CLOTH_DEEPNEST_MEET">SaluZ
+RUINS_SENTRY_
+NHIVE"
+TABYSS
+ Waterways or wz
+QRUINS
+DEEPNEST
+PABYSSD
+FUNGUS_COREg
+ABYSS_TENDR8P
+ELDERBUG_CROSSROADS_3
+aABYSS_
+QRUINS
+ABYSS_TENDRIL
+ETOWN~
+s Archives=
+ARCHIVE_ENTRANCE">...
+RUINS_4">N
+WATERWAYS_WHITEFLOW
+UI_LEVEL1
+K8)RABYSS
+bHROOM_
+DTOWNQ
+CLOTH_DEEPNEST_MEE~
+OTOWN'
+$PRUINS
+Fungus3_50
+Ruins1_31x
+Abyss18 (bef
+OHivew
+RUINS_SENTRY
+ABYSS_TUT
+FTOWNn
+FUNGUS_CORE'
+_ABYSS
+CROSSROADS_INF
+UI_LEVEL1">SINTONIZADO6
+^ABYSS,
+DEEPNEST,
+WATERWAYSk
+RUINS_SENTRY+
+ABYSS_TENDRIL">e
+M_HIVE">
+p.ATOWN
+WATERWAYS">
+ABYSS_DEEP+
+_Abyss
+FUNGUS_SHAMAN
+rchives.*
+iPRUINS
+RUINS_4">
+_ARCHIVE_INTERIOR">Y p>
+MAP_DEEPNEST
+WATERWAYS_
+CHive-
+UI_LEVEL1">ATTUNED
+KING_ABYSS_FINAL_C">
+TISO_TOWN
+R_MUSHROOM_EXCUSE
+DEEPNEST
+	RABYSS
+RUINS_SHAMAN
+MR_MUSHROOM_
+DEEPNEST_M
+ZOTE_TOWN_2">
+DEEPNESTp
+ARCHIVE_ENT
+cFUNGUSx
+WATERWAYS
+(RROOM_
+DTOWNp
+ name="MR_MUSHROOM_
+ABYSS_04f
+PRUINS
+HIVEQUEENX	
+OTOWN!
+TRUINS
+CROSSROADS_INF
+`ABYSS_
+Archives?
+ABYSS">
+ELDERBUG_CROSSROADS_INFECTED">J
+ARCHIVE_ENTRANCV
+HIVEQUEEN_E
+	WATERWAYS_WHITEFLOWER">U
+DEEPNEST
+RRUINS
+s Abyss
+ SPSFU_TOWN
+eHIVEQU
+WATERWAYS_AWAKE_3">Dioses	
+PABYSS
+Udfungus C
+TOWN">
+WATERWAYS
+YRUINS
+TABYSS'
+HIVEQUEEN
+cTOWN">7
+FUNGUS">q
+ABYSS_ASCENTT
+CROSSROADS_INF
+ruins? At
+MPRUINS
+pARCHIVE[q
+VABYSS
+@HIVE3
+1PRUINSX"
+Xtown?
+DEEPNEST
+RUINS_MARISSA_POSTER">
+^ABYSS#
+AP_ABYSS">1L
+TRUINS
+TUTORIAL_`
+bHROOM_
+	qQABYSS_
+ name="GH_HIVEQUEEN_C,
+ name="ELDERBUG_TOWN_GREET_4">
+MONOMON_ARCHIVE">Arquivos da Professora=
+MR_MUSHROOM_
+	qARCHIVE
+P hive
+cfungus
+BRUMM_DEEPNEST_1(
+ARCHIVE_ENTRANCE">...
+RUINS_4">
+RABYSS_
+RUINS_SHAMAN_1
+WATERWAYS
+ABYSS_CRAW
+`fungus
+Abyss wriP
+	OTOWN
+CROSSROADS_INF_
+KHIVEr
+oe Hive
+UI_LEVEL1">SINTONIZA
+R_MUSHROOM_7">...
+HIVE_KNIGH
+RUINS_SENTRZ
+ODSEEKER_WATERWAYS_AWAKE_NO_GODFINDER">
+EHIVER
+DEEPNEST"
+`ABYSS_6
+_Abyss
+R_MUSHROOM_FINAL2">J
+iRUINS2/
+ETQABYSS
+DEEPNEST
+HIVE_KNIGHT%
+RUINS_SENTRZ
+ABYSS_TENDRIL
+ name="ZOTE_DEEPNEST_2">
+qARCHIVE
+TABYSSB
+UI_LEVEL1">RESONANT	^
+_chive
+HORNET_ABYSSK3
+SPIDER_TOWN
+HIVEQUEENG
+Rroom_
+	Abyss_01
+Deepnest
+Teacher_archiveD
+Waterways
+Deepnest
+Deepnest_36
+Fungus1_01 E@
+Fungus2_26
+Waterways}
+TE@Hive}
+_level2
+Room_Mask_Mak
+abyss_tendrils
+23_hive-
+WaterwaysU
+1_town
+Fungus
+town_ash_p
+Fungus_drips (2)P
+Deepnest_East_15
+Crossroads_31
+yHive_03x
+Abyss_20
+Fungus2_0$
+Idle Hive
+Abyss_19
+Waterways
+X_Town
+Abyss_21
+cRuins2Y
+Zom Hive
+Ruins2_03
+Tutorial_01
+archive
+Waterways_04
+Ruins_House_03D
+Fungus2_23
+Deepnest_East
+`GetOwn
+lue_health_display_hive
+, 4=Splatter, 5=RuinsWa
+GetOwner
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+town_bench
+, 4=Splatter, 5=RuinsWa
+Tutorial_01
+GetOwner,
+, 4=Splatter, 5=RuinsWa
+HiveKnight
+HIVE_KNIGHT$
+, 4=Splatter, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwner
+Tutorial_01
+, 5=RuinsWa
+visitedFungus
+`GetOwn
+apDeepnest
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+visitedAbyss 
+:dFungus
+, 4=Splatter, 5=RuinsWa
+Tutorial_01|
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+opAbyss
+WATERWAYS
+OTOWNd
+KYAbyssA
+oABYSS
+Tutorial_01
+, 4=Splatter, 5=RuinsWa
+s.GetOwner
+, 4=Splatter, 5=RuinsWa
+GetOwner,
+Tutorial_01
+Hive_03_c
+tollBenchAbyssh
+oRuins2
+oRuins1
+GetOwner
+WATERWAYS
+GetOwner
+, 4=Splatter, 5=RuinsWa
+Deepnest_03h
+Tutorial_01l
+visitedRuinS
+, 4=Splatter, 5=RuinsWa
+WATERWAYS$
+TKxhe Hive
+PetOwng
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+tter, 5=Ruins
+, 4=Splatter, 5=RuinsWa
+lue_hive
+, 4=Splatter, 5=RuinsWa
+XABYSSX
+THE FADING TOWN
+, 4=Splatter, 5=RuinsWa
+Fp.GetOwn
+WABYSS@
+Tutorial_01
+visitedFungus
+`GetOwnv 
+utongGames.PlayMaker.Actions.GetOwner
+HIVE_KNIGH
+Tutorial_01
+`GetOwn
+`GetOwn'
+GetOwnerL
+Tutorial_01
+Tutorial_01
+deepnestBridge
+AbyssTendril
+, 4=Splatter, 5=RuinsWa
+`GetOwnA
+GetOwner0L
+, 4=Splatter, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwner
+utongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+Tutorial_01
+`GetOwn,
+AbyssCrawl
+ABYSS_CRAWL
+Crossroads_10
+URoom_A
+`GetOwn
+, 5=RuinsWa
+WABYSS@
+utongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+, 4=Splatter, 5=RuinsWa
+GetOwner
+, 4=Splatter, 5=RuinsWa
+Hive Check
+_Abyss0
+ABYSSOUTSKIRT;+
+Waterways
+_AbyssD
+Deepnest
+3RESTING_GROUNDSCITYWATERWAYSABYSSOUTSKIRTSCROSSROADSWASTESDEEPNESTX
+isitedHive
+Deepnest,
+x8OTown
+HutongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+HutongGames.PlayMaker.Actions.GetOwner
+`GetOwn
+, 4=Splatter, 5=RuinsWa
+WATERWAYSKEY
+, 4=Splatter, 5=RuinsWa
+`GetOwn
+, 5=RuinsWa
+`GetOwn
+Tutorial_01
+`GetOwnZ
+nAbyss 
+_ABYSS
+Crossroads_1
+SURoom_A
+GetOwnerP
+The Abyss0>
+tedRuins
+`GetOwn)
+_mid_level0000
+HutongGames.PlayMaker.Actions.GetOwner|
+, 4=Splatter, 5=RuinsWa
+Xf^Ruins
+NAME_ABYSS_TENDRI
+HutongGames.PlayMaker.Actions.GetOwner
+HutongGames.PlayMaker.Actions.GetOwner
+5=RuinsWa
+[ABYSS`
+^Abyss
+WATERWAYS
+, 4=Splatter, 5=RuinsWa
+utongGames.PlayMaker.Actions.GetOwner
+, 4=Splatter, 5=RuinsWa
+GetOwner
+GetOwner
+GetOwner
+Tutorial_01
