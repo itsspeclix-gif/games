@@ -1,0 +1,1071 @@
+name: Build Hollow Knight neighbor preload map
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hollowknight-build-preload-map.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-preload-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install parser dependencies
+        shell: bash
+        run: |
+          python3 -m pip install --quiet lz4
+
+      - name: Download pinned Hollow Knight reference maps
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/hk-reference
+
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/windplusflower/hk-api-skill/fdac21584342cdaf04f521aa23b36ac71f7a6eea/scene-index/scene-map.tsv" \
+            -o /tmp/hk-reference/scene-map.tsv
+
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/homothetyhk/RandomizerMod/cad3d5a7b73ed3ddf4af43795b20c23ced14bb4c/RandomizerMod/Resources/Data/transitions.json" \
+            -o /tmp/hk-reference/transitions.json
+
+      - name: Map UnityFS scenes to outer 4 MiB chunks
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import bisect
+          import csv
+          import io
+          import json
+          import re
+          import shutil
+          import statistics
+          import struct
+          from collections import defaultdict
+          from pathlib import Path
+
+          import lz4.block
+
+          ROOT = Path("hollowknight/build")
+          OUT = ROOT / "preload-analysis"
+          SCENE_MAP = Path("/tmp/hk-reference/scene-map.tsv")
+          TRANSITIONS = Path("/tmp/hk-reference/transitions.json")
+
+          SOURCE_COUNT = 42
+          SOURCE_NORMAL = 20_866_662
+          SOURCE_FINAL = 13_479_747
+          TOTAL_SIZE = 869_012_889
+
+          OUTER_CHUNK_SIZE = 4 * 1024 * 1024
+          OUTER_CHUNK_COUNT = 208
+
+          WEB_MAGIC = b"UnityWebData1.0\x00"
+          WEB_PREFIX_SIZE = len(WEB_MAGIC) + 4
+
+          UNITYFS_EXPECTED_ENGINE = "2020.2.3f1"
+
+          if OUT.exists():
+              shutil.rmtree(OUT)
+          OUT.mkdir(parents=True)
+
+          source_parts = [
+              ROOT / f"hk.data.part{i}"
+              for i in range(1, SOURCE_COUNT + 1)
+          ]
+
+          for i, path in enumerate(source_parts, 1):
+              if not path.is_file():
+                  raise SystemExit(f"Missing source part: {path}")
+              expected = SOURCE_FINAL if i == SOURCE_COUNT else SOURCE_NORMAL
+              actual = path.stat().st_size
+              if actual != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} bytes, got {actual}"
+                  )
+
+          source_sizes = [p.stat().st_size for p in source_parts]
+          if sum(source_sizes) != TOTAL_SIZE:
+              raise SystemExit(
+                  f"Logical archive size mismatch: "
+                  f"{sum(source_sizes)} != {TOTAL_SIZE}"
+              )
+
+          source_starts = []
+          running = 0
+          for size in source_sizes:
+              source_starts.append(running)
+              running += size
+
+          def logical_read(offset: int, size: int) -> bytes:
+              if offset < 0 or size < 0 or offset + size > TOTAL_SIZE:
+                  raise ValueError(
+                      f"Logical read out of range: {offset=} {size=}"
+                  )
+
+              if size == 0:
+                  return b""
+
+              out = bytearray()
+              pos = offset
+              remaining = size
+
+              while remaining:
+                  idx = bisect.bisect_right(source_starts, pos) - 1
+                  if idx < 0 or idx >= len(source_parts):
+                      raise RuntimeError(
+                          f"Unable to resolve logical offset {pos}"
+                      )
+
+                  within = pos - source_starts[idx]
+                  available = source_sizes[idx] - within
+                  take = min(remaining, available)
+
+                  with source_parts[idx].open("rb") as f:
+                      f.seek(within)
+                      block = f.read(take)
+
+                  if len(block) != take:
+                      raise RuntimeError(
+                          f"Short read from {source_parts[idx]}"
+                      )
+
+                  out.extend(block)
+                  pos += take
+                  remaining -= take
+
+              return bytes(out)
+
+          def outer_chunks_for_range(start: int, end: int) -> list[int]:
+              if end <= start:
+                  return []
+              first = start // OUTER_CHUNK_SIZE + 1
+              last = (end - 1) // OUTER_CHUNK_SIZE + 1
+              if first < 1 or last > OUTER_CHUNK_COUNT:
+                  raise RuntimeError(
+                      f"Outer chunk range invalid: {first}-{last}"
+                  )
+              return list(range(first, last + 1))
+
+          # ------------------------------------------------------------
+          # Parse outer UnityWebData directory.
+          # ------------------------------------------------------------
+
+          prefix = logical_read(0, WEB_PREFIX_SIZE)
+          if prefix[:len(WEB_MAGIC)] != WEB_MAGIC:
+              raise SystemExit("Unexpected UnityWebData magic")
+
+          web_header_end = struct.unpack_from(
+              "<I", prefix, len(WEB_MAGIC)
+          )[0]
+
+          web_header = logical_read(0, web_header_end)
+          web_entries = []
+          pos = WEB_PREFIX_SIZE
+
+          while pos < web_header_end:
+              if pos + 12 > web_header_end:
+                  raise SystemExit("Truncated UnityWebData entry")
+
+              offset, size, name_len = struct.unpack_from(
+                  "<III", web_header, pos
+              )
+              pos += 12
+
+              if name_len > web_header_end - pos:
+                  raise SystemExit("Truncated UnityWebData entry name")
+
+              name = web_header[pos:pos + name_len].decode("utf-8")
+              pos += name_len
+
+              if offset > TOTAL_SIZE or size > TOTAL_SIZE - offset:
+                  raise SystemExit(
+                      f"UnityWebData entry out of range: {name}"
+                  )
+
+              web_entries.append({
+                  "name": name,
+                  "basename": Path(name).name,
+                  "offset": offset,
+                  "size": size,
+                  "chunks": outer_chunks_for_range(
+                      offset, offset + size
+                  ),
+              })
+
+          web_by_basename = defaultdict(list)
+          for entry in web_entries:
+              web_by_basename[entry["basename"]].append(entry)
+
+          data_matches = web_by_basename.get("data.unity3d", [])
+          if len(data_matches) != 1:
+              raise SystemExit(
+                  f"Expected one data.unity3d, got {len(data_matches)}"
+              )
+
+          data_entry = data_matches[0]
+          DATA_OUTER_OFFSET = data_entry["offset"]
+          DATA_SIZE = data_entry["size"]
+
+          # ------------------------------------------------------------
+          # Minimal random-access view over data.unity3d.
+          # ------------------------------------------------------------
+
+          def bundle_read(offset: int, size: int) -> bytes:
+              if offset < 0 or size < 0 or offset + size > DATA_SIZE:
+                  raise ValueError(
+                      f"Bundle read out of range: {offset=} {size=}"
+                  )
+              return logical_read(DATA_OUTER_OFFSET + offset, size)
+
+          class BundleCursor:
+              def __init__(self):
+                  self.pos = 0
+
+              def read(self, n: int) -> bytes:
+                  data = bundle_read(self.pos, n)
+                  self.pos += n
+                  return data
+
+              def read_cstr(self) -> str:
+                  out = bytearray()
+                  while True:
+                      b = self.read(1)
+                      if b == b"\x00":
+                          return out.decode("utf-8")
+                      out.extend(b)
+
+              def u32be(self) -> int:
+                  return struct.unpack(">I", self.read(4))[0]
+
+              def u64be(self) -> int:
+                  return struct.unpack(">Q", self.read(8))[0]
+
+              def align(self, alignment: int):
+                  self.pos = (
+                      (self.pos + alignment - 1)
+                      // alignment
+                      * alignment
+                  )
+
+          cur = BundleCursor()
+
+          signature = cur.read_cstr()
+          version = cur.u32be()
+          player_version = cur.read_cstr()
+          engine_version = cur.read_cstr()
+          declared_bundle_size = cur.u64be()
+          compressed_info_size = cur.u32be()
+          uncompressed_info_size = cur.u32be()
+          archive_flags = cur.u32be()
+
+          if signature != "UnityFS":
+              raise SystemExit(
+                  f"Expected UnityFS bundle, got {signature!r}"
+              )
+
+          if version != 7:
+              raise SystemExit(
+                  f"Expected UnityFS version 7, got {version}"
+              )
+
+          if engine_version != UNITYFS_EXPECTED_ENGINE:
+              raise SystemExit(
+                  f"Unexpected Unity engine: {engine_version}"
+              )
+
+          if declared_bundle_size != DATA_SIZE:
+              raise SystemExit(
+                  f"UnityFS declared size {declared_bundle_size} "
+                  f"!= outer entry size {DATA_SIZE}"
+              )
+
+          # UnityFS v7 aligns the stream after the fixed header.
+          cur.align(16)
+          info_or_data_start = cur.pos
+
+          BLOCKS_INFO_AT_END = 0x80
+          BLOCK_INFO_PADDING_AT_START = 0x200
+
+          if archive_flags & BLOCKS_INFO_AT_END:
+              compressed_info_offset = DATA_SIZE - compressed_info_size
+              compressed_info = bundle_read(
+                  compressed_info_offset,
+                  compressed_info_size,
+              )
+              data_start = info_or_data_start
+          else:
+              compressed_info_offset = info_or_data_start
+              compressed_info = bundle_read(
+                  compressed_info_offset,
+                  compressed_info_size,
+              )
+              data_start = (
+                  compressed_info_offset + compressed_info_size
+              )
+
+          # This exact build is 0x43:
+          # 0x40 = blocks+directory combined, low bits 3 = LZ4HC.
+          info_compression = archive_flags & 0x3F
+
+          if info_compression == 0:
+              info_bytes = compressed_info
+          elif info_compression in (2, 3):
+              info_bytes = lz4.block.decompress(
+                  compressed_info,
+                  uncompressed_size=uncompressed_info_size,
+              )
+          else:
+              raise SystemExit(
+                  "Unsupported block-info compression "
+                  f"{info_compression}; flags=0x{archive_flags:x}"
+              )
+
+          if len(info_bytes) != uncompressed_info_size:
+              raise SystemExit(
+                  "Block-info decompression size mismatch: "
+                  f"{len(info_bytes)} != {uncompressed_info_size}"
+              )
+
+          # 2020.2 uses the older flag interpretation, so the build does
+          # not use the later BlockInfoNeedPaddingAtStart behavior.
+          if archive_flags & BLOCK_INFO_PADDING_AT_START:
+              raise SystemExit(
+                  "Unexpected BlockInfoNeedPaddingAtStart flag in "
+                  "this Unity 2020.2 build; inspect before proceeding"
+              )
+
+          # ------------------------------------------------------------
+          # Parse UnityFS blocks and node directory.
+          # ------------------------------------------------------------
+
+          info = io.BytesIO(info_bytes)
+
+          def info_read(n: int) -> bytes:
+              data = info.read(n)
+              if len(data) != n:
+                  raise EOFError(
+                      f"Short UnityFS info read: wanted {n}"
+                  )
+              return data
+
+          def info_u16() -> int:
+              return struct.unpack(">H", info_read(2))[0]
+
+          def info_u32() -> int:
+              return struct.unpack(">I", info_read(4))[0]
+
+          def info_u64() -> int:
+              return struct.unpack(">Q", info_read(8))[0]
+
+          def info_cstr() -> str:
+              out = bytearray()
+              while True:
+                  b = info_read(1)
+                  if b == b"\x00":
+                      return out.decode("utf-8")
+                  out.extend(b)
+
+          data_hash = info_read(16).hex()
+          block_count = info_u32()
+
+          blocks = []
+          uncomp_cursor = 0
+          comp_cursor = data_start
+
+          for index in range(block_count):
+              uncompressed_size = info_u32()
+              compressed_size = info_u32()
+              flags = info_u16()
+
+              block = {
+                  "index": index,
+                  "uncompressedStart": uncomp_cursor,
+                  "uncompressedEnd": (
+                      uncomp_cursor + uncompressed_size
+                  ),
+                  "uncompressedSize": uncompressed_size,
+                  "compressedStartInBundle": comp_cursor,
+                  "compressedEndInBundle": (
+                      comp_cursor + compressed_size
+                  ),
+                  "compressedSize": compressed_size,
+                  "compression": flags & 0x3F,
+                  "flags": flags,
+              }
+
+              block["outerLogicalStart"] = (
+                  DATA_OUTER_OFFSET
+                  + block["compressedStartInBundle"]
+              )
+              block["outerLogicalEnd"] = (
+                  DATA_OUTER_OFFSET
+                  + block["compressedEndInBundle"]
+              )
+              block["outerChunks"] = outer_chunks_for_range(
+                  block["outerLogicalStart"],
+                  block["outerLogicalEnd"],
+              )
+
+              blocks.append(block)
+              uncomp_cursor += uncompressed_size
+              comp_cursor += compressed_size
+
+          node_count = info_u32()
+          nodes = []
+
+          for index in range(node_count):
+              offset = info_u64()
+              size = info_u64()
+              flags = info_u32()
+              path = info_cstr()
+
+              nodes.append({
+                  "index": index,
+                  "path": path,
+                  "offset": offset,
+                  "size": size,
+                  "end": offset + size,
+                  "flags": flags,
+              })
+
+          if info.tell() != len(info_bytes):
+              trailing = len(info_bytes) - info.tell()
+          else:
+              trailing = 0
+
+          if comp_cursor > DATA_SIZE:
+              raise SystemExit(
+                  f"UnityFS data blocks end beyond bundle: "
+                  f"{comp_cursor} > {DATA_SIZE}"
+              )
+
+          block_uncomp_starts = [
+              b["uncompressedStart"] for b in blocks
+          ]
+
+          def blocks_for_node(node: dict) -> list[dict]:
+              start = node["offset"]
+              end = node["end"]
+
+              if end <= start:
+                  return []
+
+              # Find the first block whose uncompressed interval can
+              # overlap start.
+              idx = bisect.bisect_right(
+                  block_uncomp_starts, start
+              ) - 1
+              idx = max(idx, 0)
+
+              while (
+                  idx < len(blocks)
+                  and blocks[idx]["uncompressedEnd"] <= start
+              ):
+                  idx += 1
+
+              result = []
+              while (
+                  idx < len(blocks)
+                  and blocks[idx]["uncompressedStart"] < end
+              ):
+                  block = blocks[idx]
+                  if (
+                      block["uncompressedEnd"] > start
+                      and block["uncompressedStart"] < end
+                  ):
+                      result.append(block)
+                  idx += 1
+
+              return result
+
+          node_by_path = {}
+          duplicate_nodes = []
+
+          for node in nodes:
+              path = node["path"]
+              if path in node_by_path:
+                  duplicate_nodes.append(path)
+              else:
+                  node_by_path[path] = node
+
+              touched = blocks_for_node(node)
+              node["blockIndices"] = [
+                  b["index"] for b in touched
+              ]
+
+              chunks = set()
+              for b in touched:
+                  chunks.update(b["outerChunks"])
+              node["dataUnity3dOuterChunks"] = sorted(chunks)
+
+          if duplicate_nodes:
+              raise SystemExit(
+                  "Duplicate UnityFS node paths: "
+                  + ", ".join(duplicate_nodes[:10])
+              )
+
+          # ------------------------------------------------------------
+          # Load pinned scene map and verify against this exact bundle.
+          # ------------------------------------------------------------
+
+          level_re = re.compile(r"^level(\d+)$")
+          scene_records = []
+          scene_by_name = {}
+
+          with SCENE_MAP.open(
+              "r",
+              encoding="utf-8",
+              newline="",
+          ) as f:
+              reader = csv.DictReader(f, delimiter="\t")
+              required = {
+                  "scene",
+                  "scene_path",
+                  "level_file",
+              }
+
+              if (
+                  not reader.fieldnames
+                  or not required.issubset(reader.fieldnames)
+              ):
+                  raise SystemExit(
+                      "Scene map missing required columns"
+                  )
+
+              for row in reader:
+                  scene = (row.get("scene") or "").strip()
+                  scene_path = (
+                      row.get("scene_path") or ""
+                  ).strip()
+                  level_file = (
+                      row.get("level_file") or ""
+                  ).strip()
+
+                  match = level_re.fullmatch(level_file)
+                  if not scene or not scene_path or not match:
+                      raise SystemExit(
+                          f"Invalid scene map row: {row!r}"
+                      )
+
+                  level_index = int(match.group(1))
+                  shared_file = (
+                      f"sharedassets{level_index}.assets"
+                  )
+                  resource_file = (
+                      f"sharedassets{level_index}.resource"
+                  )
+
+                  level_node = node_by_path.get(level_file)
+                  shared_node = node_by_path.get(shared_file)
+
+                  if level_node is None:
+                      raise SystemExit(
+                          f"Bundle missing {level_file} for {scene}"
+                      )
+
+                  inner_chunks = set(
+                      level_node["dataUnity3dOuterChunks"]
+                  )
+
+                  if shared_node is not None:
+                      inner_chunks.update(
+                          shared_node[
+                              "dataUnity3dOuterChunks"
+                          ]
+                      )
+
+                  resource_matches = web_by_basename.get(
+                      resource_file, []
+                  )
+
+                  if len(resource_matches) > 1:
+                      raise SystemExit(
+                          f"Ambiguous outer resource: "
+                          f"{resource_file}"
+                      )
+
+                  resource_chunks = (
+                      resource_matches[0]["chunks"]
+                      if resource_matches
+                      else []
+                  )
+
+                  direct_chunks = sorted(
+                      inner_chunks
+                      | set(resource_chunks)
+                  )
+
+                  record = {
+                      "scene": scene,
+                      "scenePath": scene_path,
+                      "levelIndex": level_index,
+                      "levelFile": level_file,
+                      "sharedAssetsFile": (
+                          shared_file
+                          if shared_node is not None
+                          else None
+                      ),
+                      "resourceFile": (
+                          resource_file
+                          if resource_matches
+                          else None
+                      ),
+                      "levelBlockIndices": (
+                          level_node["blockIndices"]
+                      ),
+                      "sharedAssetsBlockIndices": (
+                          shared_node["blockIndices"]
+                          if shared_node is not None
+                          else []
+                      ),
+                      "dataUnity3dChunks": sorted(
+                          inner_chunks
+                      ),
+                      "resourceChunks": resource_chunks,
+                      "directPreloadChunks": direct_chunks,
+                  }
+
+                  if scene in scene_by_name:
+                      raise SystemExit(
+                          f"Duplicate scene name: {scene}"
+                      )
+
+                  scene_records.append(record)
+                  scene_by_name[scene] = record
+
+          for required_scene in (
+              "Town",
+              "Crossroads_01",
+              "Crossroads_02",
+          ):
+              if required_scene not in scene_by_name:
+                  raise SystemExit(
+                      f"Missing required scene "
+                      f"{required_scene}"
+                  )
+
+          # ------------------------------------------------------------
+          # Vanilla neighbor graph.
+          # ------------------------------------------------------------
+
+          transitions = json.loads(
+              TRANSITIONS.read_text(encoding="utf-8")
+          )
+
+          if not isinstance(transitions, dict):
+              raise SystemExit(
+                  "transitions.json is not an object"
+              )
+
+          neighbors = defaultdict(set)
+          accepted_transitions = []
+          unknown_sources = set()
+          unknown_targets = set()
+
+          for transition_name, data in transitions.items():
+              if not isinstance(data, dict):
+                  continue
+
+              source = data.get("SceneName")
+              target_spec = data.get("VanillaTarget")
+
+              if not source or not target_spec:
+                  continue
+
+              target = str(target_spec).split("[", 1)[0]
+              if not target:
+                  continue
+
+              source_known = source in scene_by_name
+              target_known = target in scene_by_name
+
+              if source_known and target_known:
+                  neighbors[source].add(target)
+                  accepted_transitions.append({
+                      "transition": transition_name,
+                      "sourceScene": source,
+                      "targetScene": target,
+                      "doorName": data.get("DoorName"),
+                      "direction": data.get("Direction"),
+                      "sides": data.get("Sides"),
+                  })
+              else:
+                  if not source_known:
+                      unknown_sources.add(source)
+                  if not target_known:
+                      unknown_targets.add(target)
+
+          if len(accepted_transitions) < 100:
+              raise SystemExit(
+                  "Too few accepted vanilla transitions: "
+                  f"{len(accepted_transitions)}"
+              )
+
+          # ------------------------------------------------------------
+          # Build neighbor warm sets.
+          # ------------------------------------------------------------
+
+          scenes_output = {}
+
+          for rec in scene_records:
+              scene = rec["scene"]
+              ns = sorted(neighbors.get(scene, set()))
+
+              neighbor_chunks_by_scene = {}
+              all_neighbor_chunks = set()
+
+              for neighbor in ns:
+                  nrec = scene_by_name[neighbor]
+                  chunks = nrec["directPreloadChunks"]
+                  neighbor_chunks_by_scene[neighbor] = chunks
+                  all_neighbor_chunks.update(chunks)
+
+              scenes_output[scene] = {
+                  **rec,
+                  "neighbors": ns,
+                  "neighborChunksByScene": (
+                      neighbor_chunks_by_scene
+                  ),
+                  "neighborPreloadChunks": sorted(
+                      all_neighbor_chunks
+                  ),
+              }
+
+          direct_counts = [
+              len(rec["directPreloadChunks"])
+              for rec in scene_records
+          ]
+
+          neighbor_counts = [
+              len(
+                  scenes_output[rec["scene"]][
+                      "neighborPreloadChunks"
+                  ]
+              )
+              for rec in scene_records
+          ]
+
+          def stat_triplet(values):
+              if not values:
+                  return {
+                      "min": 0,
+                      "median": 0,
+                      "max": 0,
+                  }
+              return {
+                  "min": min(values),
+                  "median": statistics.median(values),
+                  "max": max(values),
+              }
+
+          meta = {
+              "status": "ANALYSIS_ONLY_DO_NOT_DEPLOY_YET",
+              "productionChanged": False,
+              "logicalArchiveSize": TOTAL_SIZE,
+              "outerChunkSize": OUTER_CHUNK_SIZE,
+              "outerChunkCount": OUTER_CHUNK_COUNT,
+              "dataUnity3dOuterOffset": DATA_OUTER_OFFSET,
+              "dataUnity3dSize": DATA_SIZE,
+              "unityFS": {
+                  "signature": signature,
+                  "version": version,
+                  "playerVersion": player_version,
+                  "engineVersion": engine_version,
+                  "archiveFlags": archive_flags,
+                  "archiveFlagsHex": (
+                      f"0x{archive_flags:x}"
+                  ),
+                  "compressedInfoSize": (
+                      compressed_info_size
+                  ),
+                  "uncompressedInfoSize": (
+                      uncompressed_info_size
+                  ),
+                  "dataHash": data_hash,
+                  "dataStart": data_start,
+                  "blockCount": block_count,
+                  "nodeCount": node_count,
+                  "trailingInfoBytes": trailing,
+                  "compressedBlocksEnd": comp_cursor,
+              },
+              "sceneMapSource": (
+                  "windplusflower/hk-api-skill "
+                  "fdac21584342cdaf04f521aa23b36ac71f7a6eea "
+                  "scene-index/scene-map.tsv"
+              ),
+              "neighborGraphSource": (
+                  "homothetyhk/RandomizerMod "
+                  "cad3d5a7b73ed3ddf4af43795b20c23ced14bb4c "
+                  "RandomizerMod/Resources/Data/transitions.json"
+              ),
+              "sceneCount": len(scene_records),
+              "acceptedTransitionCount": (
+                  len(accepted_transitions)
+              ),
+              "directPreloadChunkCountStats": (
+                  stat_triplet(direct_counts)
+              ),
+              "neighborPreloadChunkCountStats": (
+                  stat_triplet(neighbor_counts)
+              ),
+              "chunkMeaning": (
+                  "directPreloadChunks includes compressed "
+                  "data.unity3d blocks intersecting levelN and "
+                  "sharedassetsN.assets, plus matching outer "
+                  "sharedassetsN.resource when present. It does "
+                  "not yet prove complete dynamic dependency coverage."
+              ),
+          }
+
+          preload_output = {
+              "_meta": meta,
+              "scenes": scenes_output,
+          }
+
+          (OUT / "preload-map.analysis.json").write_text(
+              json.dumps(preload_output, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          (OUT / "unityfs-block-map.json").write_text(
+              json.dumps({
+                  "_meta": meta["unityFS"],
+                  "blocks": blocks,
+                  "nodes": nodes,
+              }, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          (OUT / "room-neighbors.json").write_text(
+              json.dumps({
+                  "_meta": {
+                      "acceptedTransitionCount": (
+                          len(accepted_transitions)
+                      ),
+                  },
+                  "neighbors": {
+                      scene: sorted(targets)
+                      for scene, targets in sorted(
+                          neighbors.items()
+                      )
+                  },
+                  "transitions": accepted_transitions,
+                  "referenceScenesMissingFromSceneMap": {
+                      "sources": sorted(unknown_sources),
+                      "targets": sorted(unknown_targets),
+                  },
+              }, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          with (
+              OUT / "scene-preload-summary.tsv"
+          ).open(
+              "w",
+              encoding="utf-8",
+              newline="",
+          ) as f:
+              writer = csv.writer(
+                  f,
+                  delimiter="\t",
+                  lineterminator="\n",
+              )
+              writer.writerow([
+                  "scene",
+                  "level",
+                  "neighbors",
+                  "direct_chunk_count",
+                  "neighbor_chunk_count",
+                  "direct_chunks",
+                  "neighbor_chunks",
+              ])
+
+              for scene, rec in scenes_output.items():
+                  writer.writerow([
+                      scene,
+                      rec["levelIndex"],
+                      ",".join(rec["neighbors"]),
+                      len(rec["directPreloadChunks"]),
+                      len(rec["neighborPreloadChunks"]),
+                      ",".join(
+                          map(
+                              str,
+                              rec[
+                                  "directPreloadChunks"
+                              ],
+                          )
+                      ),
+                      ",".join(
+                          map(
+                              str,
+                              rec[
+                                  "neighborPreloadChunks"
+                              ],
+                          )
+                      ),
+                  ])
+
+          examples = [
+              name for name in (
+                  "Town",
+                  "Crossroads_01",
+                  "Crossroads_02",
+                  "Crossroads_04",
+              )
+              if name in scenes_output
+          ]
+
+          report_lines = [
+              "Hollow Knight neighbor preload block mapping",
+              "",
+              "PRODUCTION CHANGED: NO",
+              "STATUS: ANALYSIS ONLY",
+              "",
+              f"UnityFS engine: {engine_version}",
+              f"UnityFS flags: 0x{archive_flags:x}",
+              f"UnityFS blocks: {block_count}",
+              f"UnityFS nodes: {node_count}",
+              f"Scenes mapped: {len(scene_records)}",
+              (
+                  "Accepted vanilla transitions: "
+                  f"{len(accepted_transitions)}"
+              ),
+              "",
+              (
+                  "Direct preload chunk stats: "
+                  f"{stat_triplet(direct_counts)}"
+              ),
+              (
+                  "Neighbor preload chunk stats: "
+                  f"{stat_triplet(neighbor_counts)}"
+              ),
+              "",
+              "Examples:",
+          ]
+
+          for scene in examples:
+              rec = scenes_output[scene]
+              report_lines.extend([
+                  "",
+                  f"[{scene}]",
+                  f"  level: {rec['levelFile']}",
+                  (
+                      "  neighbors: "
+                      + ", ".join(rec["neighbors"])
+                  ),
+                  (
+                      "  direct chunks: "
+                      + ",".join(
+                          map(
+                              str,
+                              rec[
+                                  "directPreloadChunks"
+                              ],
+                          )
+                      )
+                  ),
+                  (
+                      "  neighbor chunks: "
+                      + ",".join(
+                          map(
+                              str,
+                              rec[
+                                  "neighborPreloadChunks"
+                              ],
+                          )
+                      )
+                  ),
+              ])
+
+          report_lines.extend([
+              "",
+              "IMPORTANT:",
+              (
+                  "This is the first map based on the actual "
+                  "compressed UnityFS blocks in this WebGL build."
+              ),
+              (
+                  "It includes levelN, matching "
+                  "sharedassetsN.assets, and matching outer "
+                  "sharedassetsN.resource."
+              ),
+              (
+                  "Before deployment, runtime miss logging should "
+                  "verify whether other dynamic/shared dependencies "
+                  "still cause blocking cold requests."
+              ),
+          ])
+
+          report = "\n".join(report_lines) + "\n"
+
+          (OUT / "preload-map-report.txt").write_text(
+              report,
+              encoding="utf-8",
+          )
+
+          print(report)
+
+          print("Generated:")
+          for path in sorted(OUT.iterdir()):
+              print(
+                  f"  {path}: {path.stat().st_size} bytes"
+              )
+          PY
+
+      - name: Commit preload analysis outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add hollowknight/build/preload-analysis
+
+          if git diff --cached --quiet; then
+            echo "Preload analysis outputs are unchanged."
+          else
+            git commit \
+              -m "Add Hollow Knight neighbor preload block map"
+
+            git -c http.version=HTTP/1.1 \
+              push origin HEAD:main
+          fi
+
+      - name: Final safety check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s \
+            hollowknight/build/preload-analysis/preload-map.analysis.json
+
+          test -s \
+            hollowknight/build/preload-analysis/unityfs-block-map.json
+
+          test -s \
+            hollowknight/build/preload-analysis/room-neighbors.json
+
+          test -s \
+            hollowknight/build/preload-analysis/preload-map-report.txt
+
+          grep -q \
+            'ANALYSIS_ONLY_DO_NOT_DEPLOY_YET' \
+            hollowknight/build/preload-analysis/preload-map.analysis.json
+
+          echo "Neighbor preload block map generated."
+          echo "Production Hollow Knight files were not changed."
