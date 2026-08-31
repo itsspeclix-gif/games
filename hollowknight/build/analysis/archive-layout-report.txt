@@ -1,0 +1,127 @@
+Hollow Knight WebGL archive layout diagnostic
+
+PRODUCTION CHANGED: NO
+DATA MODE: 4 MiB
+
+Logical archive bytes: 869012889
+UnityWebData header bytes: 8486
+Archive entry count: 237
+Candidate scene/asset names: 233
+
+Top suffixes:
+  .resource: 230
+  .config: 2
+  .json: 2
+  (none): 1
+  .dat: 1
+  .unity3d: 1
+
+Top parent directories:
+  .: 234
+  Resources: 1
+  Managed/mono/4.0: 1
+  Il2CppData/Metadata: 1
+
+First 50 exact archive names:
+  Resources/unity_default_resources
+  Managed/mono/4.0/machine.config
+  Il2CppData/Metadata/global-metadata.dat
+  boot.config
+  data.unity3d
+  resources.resource
+  RuntimeInitializeOnLoads.json
+  ScriptingAssemblies.json
+  sharedassets0.resource
+  sharedassets1.resource
+  sharedassets10.resource
+  sharedassets101.resource
+  sharedassets102.resource
+  sharedassets105.resource
+  sharedassets108.resource
+  sharedassets109.resource
+  sharedassets113.resource
+  sharedassets115.resource
+  sharedassets118.resource
+  sharedassets12.resource
+  sharedassets124.resource
+  sharedassets126.resource
+  sharedassets127.resource
+  sharedassets128.resource
+  sharedassets13.resource
+  sharedassets130.resource
+  sharedassets133.resource
+  sharedassets135.resource
+  sharedassets137.resource
+  sharedassets138.resource
+  sharedassets139.resource
+  sharedassets14.resource
+  sharedassets140.resource
+  sharedassets143.resource
+  sharedassets148.resource
+  sharedassets149.resource
+  sharedassets15.resource
+  sharedassets151.resource
+  sharedassets152.resource
+  sharedassets156.resource
+  sharedassets16.resource
+  sharedassets161.resource
+  sharedassets164.resource
+  sharedassets167.resource
+  sharedassets168.resource
+  sharedassets169.resource
+  sharedassets17.resource
+  sharedassets171.resource
+  sharedassets173.resource
+  sharedassets176.resource
+
+Last 50 exact archive names:
+  sharedassets458.resource
+  sharedassets459.resource
+  sharedassets46.resource
+  sharedassets460.resource
+  sharedassets470.resource
+  sharedassets471.resource
+  sharedassets472.resource
+  sharedassets473.resource
+  sharedassets474.resource
+  sharedassets475.resource
+  sharedassets477.resource
+  sharedassets48.resource
+  sharedassets480.resource
+  sharedassets481.resource
+  sharedassets482.resource
+  sharedassets485.resource
+  sharedassets486.resource
+  sharedassets49.resource
+  sharedassets5.resource
+  sharedassets50.resource
+  sharedassets500.resource
+  sharedassets51.resource
+  sharedassets53.resource
+  sharedassets56.resource
+  sharedassets57.resource
+  sharedassets58.resource
+  sharedassets6.resource
+  sharedassets62.resource
+  sharedassets64.resource
+  sharedassets68.resource
+  sharedassets7.resource
+  sharedassets73.resource
+  sharedassets76.resource
+  sharedassets77.resource
+  sharedassets79.resource
+  sharedassets8.resource
+  sharedassets81.resource
+  sharedassets82.resource
+  sharedassets83.resource
+  sharedassets84.resource
+  sharedassets85.resource
+  sharedassets86.resource
+  sharedassets87.resource
+  sharedassets88.resource
+  sharedassets9.resource
+  sharedassets90.resource
+  sharedassets91.resource
+  sharedassets92.resource
+  sharedassets93.resource
+  sharedassets99.resource
