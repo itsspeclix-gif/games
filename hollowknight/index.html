@@ -143,6 +143,7 @@
         message.textContent = 'Starting game…';
 
         const unityConfig = {
+          devicePixelRatio: 0.8,
           frameworkUrl: buildBase + 'hk.framework.js?live=' + live,
           codeUrl,
           dataPartUrls: numberedUrls(dataBase, 'hk.data', DATA_PART_COUNT),
