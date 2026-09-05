@@ -2,7 +2,7 @@
   'use strict';
 
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
-  const DEFAULT_CONCURRENCY = 2;
+  const DEFAULT_CONCURRENCY = 1;
   const DEFAULT_READ_WINDOW_MS = 1800;
 
   if (window.installHollowKnightNeighborPreload) return;
@@ -176,8 +176,25 @@
         );
       }
 
-      let body = await response.arrayBuffer();
-      body = null;
+      // Drain the response without materializing the whole 4 MiB chunk
+      // as one ArrayBuffer. This keeps transient JS memory much lower on Safari.
+      if (response.body && typeof response.body.getReader === 'function') {
+        const reader = response.body.getReader();
+
+        try {
+          while (true) {
+            const { done } = await reader.read();
+            if (done) break;
+          }
+        } finally {
+          try {
+            reader.releaseLock();
+          } catch (_) {}
+        }
+      } else {
+        // Fallback for browsers without ReadableStream support.
+        await response.arrayBuffer();
+      }
     }
 
     async function warmNeighbors(sceneName) {
@@ -587,7 +604,7 @@
     }
 
     const controller = {
-      version: '1.0.0',
+      version: '1.1.0',
       state,
       cleanup() {
         cancelWarmQueue();
