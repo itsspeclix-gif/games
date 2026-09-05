@@ -172,7 +172,7 @@
             mapUrl: buildBase + 'preload-analysis/preload-map.analysis.json',
             dataPartUrls: unityConfig.dataPartUrls,
             partSize: DATA_PART_SIZE,
-            preloadConcurrency: 2
+            preloadConcurrency: 1
           }).catch(error => {
             console.warn('Neighbor preload disabled:', error);
           });
