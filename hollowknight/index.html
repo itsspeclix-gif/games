@@ -34,6 +34,30 @@
       width: min(320px, 80vw);
       height: 12px;
     }
+
+    #data-progress,
+    #retry-status,
+    #build-version,
+    #build-profile {
+      font: 500 12px/1.35 system-ui, sans-serif;
+      opacity: 0.78;
+    }
+
+    #retry-status {
+      min-height: 1.35em;
+      opacity: 0.95;
+    }
+
+    #build-version {
+      margin-top: 2px;
+      font-weight: 700;
+      opacity: 0.92;
+    }
+
+    #build-profile {
+      font-size: 11px;
+      opacity: 0.58;
+    }
   </style>
 </head>
 <body>
@@ -41,12 +65,19 @@
   <div id="loading">
     <span id="message">Loading runtime…</span>
     <progress id="progress" value="0" max="1"></progress>
+    <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
+    <div id="retry-status"></div>
+    <div id="build-version">Version: HK-WebGL 2026.09.18-r1</div>
+    <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
   <script>
+    const BUILD_VERSION = 'HK-WebGL 2026.09.18-r1';
+    const BUILD_TOKEN = '2026.09.18-r1';
     const DATA_PART_SIZE = 4 * 1024 * 1024;
     const DATA_TOTAL_SIZE = 869012889;
     const DATA_PART_COUNT = Math.ceil(DATA_TOTAL_SIZE / DATA_PART_SIZE); // 208
+    const STARTUP_RETRY_DELAYS = [0, 600, 1400, 2800];
 
     const buildBase = 'build/';
     const dataBase = buildBase + 'data4m/';
@@ -55,6 +86,181 @@
     const loading = document.getElementById('loading');
     const message = document.getElementById('message');
     const progress = document.getElementById('progress');
+    const dataProgress = document.getElementById('data-progress');
+    const retryStatus = document.getElementById('retry-status');
+
+    window.__hkBuildVersion = BUILD_VERSION;
+
+    const nativeFetch = window.fetch.bind(window);
+
+    function wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function formatMB(bytes) {
+      return Math.round(bytes / 1e6);
+    }
+
+    function resourceLabel(input) {
+      const raw =
+        typeof input === 'string'
+          ? input
+          : (input && input.url ? input.url : 'resource');
+
+      const clean = String(raw).split('?')[0];
+      return clean.split('/').pop() || 'resource';
+    }
+
+    function setRetryStatus(text) {
+      retryStatus.textContent = text || '';
+    }
+
+    async function fetchWithRetry(input, init = {}, label) {
+      let lastError = null;
+
+      for (
+        let attempt = 0;
+        attempt < STARTUP_RETRY_DELAYS.length;
+        attempt += 1
+      ) {
+        if (attempt > 0) {
+          setRetryStatus(
+            'Connection interrupted — retrying ' +
+            (label || resourceLabel(input)) +
+            ' (' + (attempt + 1) + '/' +
+            STARTUP_RETRY_DELAYS.length + ')…'
+          );
+
+          await wait(STARTUP_RETRY_DELAYS[attempt]);
+        }
+
+        try {
+          const retryInit = Object.assign({}, init);
+
+          if (attempt > 0) {
+            retryInit.cache = 'reload';
+          }
+
+          const response = await nativeFetch(input, retryInit);
+
+          if (
+            response.ok ||
+            response.status === 304 ||
+            attempt + 1 === STARTUP_RETRY_DELAYS.length
+          ) {
+            if (attempt > 0 && response.ok) {
+              setRetryStatus('Connection restored.');
+              setTimeout(() => {
+                if (retryStatus.textContent === 'Connection restored.') {
+                  setRetryStatus('');
+                }
+              }, 900);
+            }
+
+            return response;
+          }
+
+          lastError = new Error(
+            'HTTP ' + response.status + ' for ' +
+            resourceLabel(input)
+          );
+
+          try {
+            if (response.body) await response.body.cancel();
+          } catch (_) {}
+        } catch (error) {
+          lastError = error;
+
+          if (attempt + 1 === STARTUP_RETRY_DELAYS.length) {
+            throw error;
+          }
+        }
+      }
+
+      throw lastError || new Error('Startup request failed');
+    }
+
+    function installStartupFetchRetry() {
+      const previousFetch = window.fetch;
+
+      const wrappedFetch = (input, init) =>
+        fetchWithRetry(input, init, resourceLabel(input));
+
+      window.fetch = wrappedFetch;
+
+      return () => {
+        if (window.fetch === wrappedFetch) {
+          window.fetch = previousFetch;
+        }
+      };
+    }
+
+    function conciseStartupError(error) {
+      const raw =
+        error && error.message
+          ? error.message
+          : String(error);
+
+      if (
+        /hk\.data\.part/i.test(raw) ||
+        /jsdelivr/i.test(raw) ||
+        /network/i.test(raw) ||
+        /failed to fetch/i.test(raw)
+      ) {
+        return (
+          'Network/CDN error while loading Hollow Knight data. ' +
+          'Automatic retries were exhausted. Reload and try again.'
+        );
+      }
+
+      return raw.length > 320
+        ? raw.slice(0, 320) + '…'
+        : raw;
+    }
+
+    function updateDataProgress() {
+      const stats = window.__hkLazyStats;
+
+      if (!stats) {
+        dataProgress.textContent =
+          'Game data streamed: 0 / ' +
+          formatMB(DATA_TOTAL_SIZE) +
+          ' MB archive';
+        return;
+      }
+
+      const uniqueDemanded = Math.max(
+        0,
+        Number(stats.uniqueParts) || 0
+      );
+
+      const bootstrapLoaded =
+        Number(stats.cacheItems) > 0 ? 1 : 0;
+
+      const uniqueParts = Math.min(
+        DATA_PART_COUNT,
+        uniqueDemanded + bootstrapLoaded
+      );
+
+      let bytes = Math.min(
+        DATA_TOTAL_SIZE,
+        uniqueParts * DATA_PART_SIZE
+      );
+
+      if (uniqueParts >= DATA_PART_COUNT) {
+        bytes = DATA_TOTAL_SIZE;
+      }
+
+      dataProgress.textContent =
+        'Game data streamed: ' +
+        formatMB(bytes) +
+        ' / ' +
+        formatMB(DATA_TOTAL_SIZE) +
+        ' MB archive';
+    }
+
+    let dataProgressTimer =
+      setInterval(updateDataProgress, 180);
 
     function numberedUrls(base, prefix, count) {
       return Array.from(
@@ -63,7 +269,7 @@
       );
     }
 
-    function loadScript(url) {
+    function loadScriptOnce(url) {
       return new Promise((resolve, reject) => {
         const script = document.createElement('script');
         script.src = url;
@@ -79,6 +285,53 @@
       });
     }
 
+    async function loadScript(url, label) {
+      let lastError = null;
+
+      for (
+        let attempt = 0;
+        attempt < STARTUP_RETRY_DELAYS.length;
+        attempt += 1
+      ) {
+        if (attempt > 0) {
+          setRetryStatus(
+            'Connection interrupted — retrying ' +
+            (label || resourceLabel(url)) +
+            ' (' + (attempt + 1) + '/' +
+            STARTUP_RETRY_DELAYS.length + ')…'
+          );
+
+          await wait(STARTUP_RETRY_DELAYS[attempt]);
+        }
+
+        const retryUrl =
+          attempt === 0
+            ? url
+            : url +
+              (url.includes('?') ? '&' : '?') +
+              'retry=' + attempt + '-' + Date.now();
+
+        try {
+          await loadScriptOnce(retryUrl);
+
+          if (attempt > 0) {
+            setRetryStatus('Connection restored.');
+            setTimeout(() => {
+              if (retryStatus.textContent === 'Connection restored.') {
+                setRetryStatus('');
+              }
+            }, 900);
+          }
+
+          return;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      throw lastError || new Error('Could not load ' + url);
+    }
+
     async function joinParts(urls, type, label) {
       const blobs = [];
 
@@ -86,7 +339,11 @@
         message.textContent =
           'Loading ' + label + ' ' + (index + 1) + ' of ' + urls.length + '…';
 
-        const response = await fetch(urls[index], { cache: 'force-cache' });
+        const response = await fetchWithRetry(
+          urls[index],
+          { cache: 'force-cache' },
+          label + ' ' + (index + 1) + '/' + urls.length
+        );
         if (!response.ok) {
           throw new Error(
             'Could not load ' + urls[index] + ' (' + response.status + ')'
@@ -111,23 +368,70 @@
     }
 
     let codeUrl = null;
+    let frameworkObjectUrl = null;
 
     function revokeRuntimeUrl() {
-      if (!codeUrl) return;
-      URL.revokeObjectURL(codeUrl);
-      codeUrl = null;
+      if (codeUrl) {
+        URL.revokeObjectURL(codeUrl);
+        codeUrl = null;
+      }
+
+      if (frameworkObjectUrl) {
+        URL.revokeObjectURL(frameworkObjectUrl);
+        frameworkObjectUrl = null;
+      }
+    }
+
+    async function prepareFrameworkUrl() {
+      const sourceUrl =
+        buildBase +
+        'hk.framework.js?v=' +
+        encodeURIComponent(BUILD_TOKEN);
+
+      const response = await fetchWithRetry(
+        sourceUrl,
+        { cache: 'force-cache' },
+        'framework'
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          'Could not load framework (' + response.status + ')'
+        );
+      }
+
+      const blob = await response.blob();
+
+      frameworkObjectUrl = URL.createObjectURL(
+        new Blob([blob], { type: 'text/javascript' })
+      );
+
+      return frameworkObjectUrl;
     }
 
     async function startGame() {
       try {
-        // Keep small executable JS live with @main. Heavy WASM/data stay cacheable.
-        const live = Date.now();
-        await loadScript(buildBase + 'hk.stabilityfs.js?live=' + live);
-        await loadScript(buildBase + 'hk.loader.js?live=' + live);
+        setRetryStatus('');
+
+        const versionQuery =
+          '?v=' + encodeURIComponent(BUILD_TOKEN);
+
+        await loadScript(
+          buildBase + 'hk.stabilityfs.js' + versionQuery,
+          'filesystem'
+        );
+
+        await loadScript(
+          buildBase + 'hk.loader.js' + versionQuery,
+          'loader'
+        );
 
         let neighborPreloadReady = false;
         try {
-          await loadScript(buildBase + 'hk.preload.js?live=' + live);
+          await loadScript(
+            buildBase + 'hk.preload.js' + versionQuery,
+            'preloader'
+          );
           neighborPreloadReady =
             typeof window.installHollowKnightNeighborPreload === 'function';
         } catch (error) {
@@ -140,11 +444,15 @@
           'runtime'
         );
 
+        message.textContent = 'Loading framework…';
+
+        const frameworkUrl = await prepareFrameworkUrl();
+
         message.textContent = 'Starting game…';
 
         const unityConfig = {
           devicePixelRatio: 0.8,
-          frameworkUrl: buildBase + 'hk.framework.js?live=' + live,
+          frameworkUrl,
           codeUrl,
           dataPartUrls: numberedUrls(dataBase, 'hk.data', DATA_PART_COUNT),
           mountDataParts: (module, urls) =>
@@ -155,11 +463,23 @@
             })
         };
 
-        const instance = await createUnityInstance(
-          canvas,
-          unityConfig,
-          value => { progress.value = value; }
-        );
+        const restoreStartupFetch =
+          installStartupFetchRetry();
+
+        let instance;
+
+        try {
+          instance = await createUnityInstance(
+            canvas,
+            unityConfig,
+            value => {
+              progress.value = value;
+              updateDataProgress();
+            }
+          );
+        } finally {
+          restoreStartupFetch();
+        }
 
         // Deliberately exposed for independent diagnostics/bookmarklets.
         window.__hkUnityInstance = instance;
@@ -178,14 +498,28 @@
           });
         }
 
+        updateDataProgress();
+
+        if (dataProgressTimer) {
+          clearInterval(dataProgressTimer);
+          dataProgressTimer = null;
+        }
+
         revokeRuntimeUrl();
         loading.remove();
       } catch (error) {
+        if (dataProgressTimer) {
+          clearInterval(dataProgressTimer);
+          dataProgressTimer = null;
+        }
+
         revokeRuntimeUrl();
         console.error(error);
+        setRetryStatus('');
+
         message.textContent =
           'Unable to start: ' +
-          (error && error.message ? error.message : String(error));
+          conciseStartupError(error);
       }
     }
 
