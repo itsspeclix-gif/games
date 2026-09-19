@@ -110,50 +110,92 @@
 
   function syncWhole(url, stats) {
     const started = performance.now();
-    let xhr = new XMLHttpRequest();
-    let text = '';
+    const maxAttempts = 3;
+    const partName = url.split('/').pop() || url;
+    let lastError = null;
+    let lastStatus = 0;
 
-    stats.activePart = url.split('/').pop() || url;
+    stats.activePart = partName;
     stats.phase = 'sync-read';
-    setMessage('Streaming ' + stats.activePart + '…');
+    setMessage('Streaming ' + partName + '…');
 
-    try {
-      xhr.open('GET', url, false);
-      if (xhr.overrideMimeType) {
-        xhr.overrideMimeType('text/plain; charset=x-user-defined');
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let xhr = new XMLHttpRequest();
+      let text = '';
+
+      try {
+        xhr.open('GET', url, false);
+
+        if (xhr.overrideMimeType) {
+          xhr.overrideMimeType('text/plain; charset=x-user-defined');
+        }
+
+        xhr.send(null);
+
+        lastStatus = xhr.status;
+
+        const statusOkay =
+          (xhr.status >= 200 && xhr.status < 300) ||
+          xhr.status === 304 ||
+          xhr.status === 0;
+
+        if (!statusOkay) {
+          lastError = new Error(
+            'StabilityFS HTTP ' + xhr.status + ' for ' + url
+          );
+        } else {
+          text = xhr.responseText || '';
+          const bytes = new Uint8Array(text.length);
+
+          for (let index = 0; index < text.length; index += 1) {
+            bytes[index] = text.charCodeAt(index) & 255;
+          }
+
+          stats.syncPartLoads += 1;
+          stats.syncBytes += bytes.byteLength;
+          stats.syncBlockedMs += performance.now() - started;
+          stats.activePart = '';
+
+          text = '';
+          xhr = null;
+
+          return bytes;
+        }
+      } catch (error) {
+        lastError = new Error(
+          'StabilityFS whole-file XHR failed: ' + errorText(error)
+        );
       }
-      xhr.send(null);
-    } catch (error) {
-      stats.activePart = '';
-      throw new Error('StabilityFS whole-file XHR failed: ' + errorText(error));
+
+      xhr = null;
+      text = '';
+
+      if (attempt < maxAttempts) {
+        stats.syncRetries += 1;
+        stats.phase = 'sync-retry';
+
+        setMessage(
+          'Connection interrupted — retrying ' +
+          partName +
+          ' (' +
+          (attempt + 1) +
+          '/' +
+          maxAttempts +
+          ')…'
+        );
+      }
     }
 
-    if (
-      !(xhr.status >= 200 && xhr.status < 300) &&
-      xhr.status !== 304 &&
-      xhr.status !== 0
-    ) {
-      const status = xhr.status;
-      stats.activePart = '';
-      throw new Error('StabilityFS HTTP ' + status + ' for ' + url);
-    }
-
-    text = xhr.responseText || '';
-    const bytes = new Uint8Array(text.length);
-    for (let index = 0; index < text.length; index += 1) {
-      bytes[index] = text.charCodeAt(index) & 255;
-    }
-
-    stats.syncPartLoads += 1;
-    stats.syncBytes += bytes.byteLength;
     stats.syncBlockedMs += performance.now() - started;
     stats.activePart = '';
 
-    // Shorten the lifetime of the large temporary response string.
-    text = '';
-    xhr = null;
+    if (lastError) {
+      throw lastError;
+    }
 
-    return bytes;
+    throw new Error(
+      'StabilityFS HTTP ' + lastStatus + ' for ' + url
+    );
   }
 
   async function mountUnityDataParts(module, urls, options) {
@@ -222,6 +264,7 @@
       refetches: 0,
       evictions: 0,
       syncPartLoads: 0,
+      syncRetries: 0,
       syncBytes: 0,
       syncBlockedMs: 0,
       opens: 0,
