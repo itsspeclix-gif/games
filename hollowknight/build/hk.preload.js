@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const BUILD_VERSION = '2026.09.25-r3';
+  const BUILD_VERSION = '2026.09.25-r4';
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
   const DEFAULT_READ_WINDOW_MS = 1800;
   const WARM_TTL_MS = 120000;
@@ -179,7 +179,7 @@
       candidateTimer: null, warmController: null, warmedParts: new Map(),
       activeWarmParts: new Set(), failedParts: new Map(), learnedParts: new Map(),
       desiredParts: new Set(), queue: [], refreshTimer: null, running: false,
-      suspended: Boolean(document.hidden), disposed: false, status: 'initializing',
+      suspended: Boolean(document.hidden || (module.__hkLifecycle && module.__hkLifecycle.state.paused)), disposed: false, status: 'initializing',
       warmRequests: 0, warmRetries: 0, warmFailures: 0, warmBytes: 0,
       lastError: '', lastFailure: null, streamFallbacks: 0, markerRanges: 0,
       lastFileRestore: null, dataReadRestore: null
@@ -535,7 +535,8 @@
     }
 
     function resume() {
-      if (state.disposed || document.hidden || !state.suspended) return;
+      if (state.disposed || document.hidden || !state.suspended ||
+          (module.__hkLifecycle && module.__hkLifecycle.state.paused)) return;
       state.suspended = false;
       state.recentDataReads.length = 0;
       state.candidateScene = ''; state.candidateHits = 0;
@@ -546,7 +547,7 @@
     const visibility = () => document.hidden ? suspend() : resume();
     const online = () => { state.failedParts.clear(); warmNeighbors(); };
     const controller = {
-      version: '1.2.0', build: BUILD_VERSION, state,
+      version: '1.2.1', build: BUILD_VERSION, state, suspend, resume,
       cleanup() {
         state.disposed = true; suspend(); state.status = 'stopped';
         document.removeEventListener('visibilitychange', visibility);
