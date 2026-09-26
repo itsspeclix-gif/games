@@ -67,13 +67,18 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.09.18-r1</div>
+    <div id="build-version">Version: HK-WebGL 2026.09.25-r2</div>
     <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.09.18-r1';
-    const BUILD_TOKEN = '2026.09.18-r1';
+    const BUILD_VERSION = 'HK-WebGL 2026.09.25-r2';
+    const BUILD_TOKEN = '2026.09.25-r2';
+    // Immutable copy of this archive, used only after two failed CDN reads.
+    // Update this revision together with the data geometry if assets change.
+    const DATA_FALLBACK_BASE =
+      'https://raw.githubusercontent.com/itsspeclix-gif/games/' +
+      '5e0d63dc1d5878cf0fa42b8d3caf97613eb7bf1d/hollowknight/build/data4m/';
     const DATA_PART_SIZE = 4 * 1024 * 1024;
     const DATA_TOTAL_SIZE = 869012889;
     const DATA_PART_COUNT = Math.ceil(DATA_TOTAL_SIZE / DATA_PART_SIZE); // 208
@@ -357,6 +362,24 @@
       return objectUrl;
     }
 
+    function reportDataReadError(detail) {
+      // No changes to the normal game UI. Restore the existing loading panel
+      // only for a genuine, unrecovered read failure; never clear saved data.
+      if (!loading.isConnected) document.body.appendChild(loading);
+      loading.style.background = '#101018';
+      loading.style.zIndex = '2147483647';
+      loading.style.padding = '24px';
+      progress.hidden = true;
+      message.style.maxWidth = 'min(640px, 90vw)';
+      message.style.overflowWrap = 'anywhere';
+      message.textContent = detail.kind === 'data-io'
+        ? 'Game data could not be loaded after automatic retries. Close this game and reopen it from Game Library.'
+        : 'Game data read failed. Close this game and reopen it from Game Library.';
+      retryStatus.style.maxWidth = 'min(640px, 90vw)';
+      retryStatus.style.overflowWrap = 'anywhere';
+      retryStatus.textContent = detail.file + ': ' + detail.message;
+    }
+
     function updateMountProgress(update) {
       if (update.phase === 'mounting') {
         message.textContent =
@@ -421,6 +444,10 @@
           'filesystem'
         );
 
+        if (window.__hkStabilityFSVersion !== BUILD_TOKEN) {
+          throw new Error('Filesystem update is still cached. Purge the filesystem CDN URL and reopen the game.');
+        }
+
         await loadScript(
           buildBase + 'hk.loader.js' + versionQuery,
           'loader'
@@ -459,7 +486,9 @@
             mountUnityDataParts(module, urls, {
               partSize: DATA_PART_SIZE,
               totalSize: DATA_TOTAL_SIZE,
-              onProgress: updateMountProgress
+              onProgress: updateMountProgress,
+              fallbackUrls: numberedUrls(DATA_FALLBACK_BASE, 'hk.data', DATA_PART_COUNT),
+              onReadError: reportDataReadError
             })
         };
 
@@ -506,7 +535,7 @@
         }
 
         revokeRuntimeUrl();
-        loading.remove();
+        if (!window.__hkLastReadFailure) loading.remove();
       } catch (error) {
         if (dataProgressTimer) {
           clearInterval(dataProgressTimer);
@@ -517,9 +546,11 @@
         console.error(error);
         setRetryStatus('');
 
-        message.textContent =
-          'Unable to start: ' +
-          conciseStartupError(error);
+        if (window.__hkLastReadFailure) {
+          reportDataReadError(window.__hkLastReadFailure);
+        } else {
+          message.textContent = 'Unable to start: ' + conciseStartupError(error);
+        }
       }
     }
 
