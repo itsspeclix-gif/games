@@ -67,13 +67,13 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.09.25-r3</div>
+    <div id="build-version">Version: HK-WebGL 2026.09.25-r4</div>
     <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.09.25-r3';
-    const BUILD_TOKEN = '2026.09.25-r3';
+    const BUILD_VERSION = 'HK-WebGL 2026.09.25-r4';
+    const BUILD_TOKEN = '2026.09.25-r4';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
     const DATA_FALLBACK_BASE =
@@ -392,6 +392,7 @@
 
     let codeUrl = null;
     let frameworkObjectUrl = null;
+    let lifecycle = null;
 
     function revokeRuntimeUrl() {
       if (codeUrl) {
@@ -423,10 +424,11 @@
         );
       }
 
-      const blob = await response.blob();
-
+      // The existing framework is patched only in this short-lived Blob.
+      // A mismatched layout fails visibly instead of silently skipping the fix.
+      const source = prepareHollowKnightFramework(await response.text());
       frameworkObjectUrl = URL.createObjectURL(
-        new Blob([blob], { type: 'text/javascript' })
+        new Blob([source], { type: 'text/javascript' })
       );
 
       return frameworkObjectUrl;
@@ -439,7 +441,7 @@
 
     function installNeighborPreload() {
       if (preloadInstallTask) return preloadInstallTask;
-      if (!preloadModule || document.hidden) return Promise.resolve();
+      if (!preloadModule || document.hidden || (lifecycle && lifecycle.state.paused)) return Promise.resolve();
       if (preloadRetryTimer !== null) clearTimeout(preloadRetryTimer);
       preloadRetryTimer = null;
       preloadInstallTask = installHollowKnightNeighborPreload({ Module: preloadModule }, {
@@ -452,6 +454,7 @@
         if (notice) notice.remove();
         document.removeEventListener('visibilitychange', installNeighborPreload);
         window.removeEventListener('online', installNeighborPreload);
+        document.removeEventListener('hk-game-resumed', installNeighborPreload);
         preloadModule = preloadUrls = null;
       }).catch(error => {
         reportPreloadError(error);
@@ -494,6 +497,9 @@
           throw new Error('Filesystem update is still cached. Purge the filesystem CDN URL and reopen the game.');
         }
 
+        lifecycle = installHollowKnightLifecycle(canvas);
+        document.addEventListener('hk-game-resumed', installNeighborPreload);
+
         await loadScript(
           buildBase + 'hk.loader.js' + versionQuery,
           'loader'
@@ -526,11 +532,15 @@
         message.textContent = 'Starting game…';
 
         const unityConfig = {
+          __hkLifecycle: lifecycle,
+          preMainLoop: () => lifecycle.beforeFrame(),
+          errorHandler: error => lifecycle.runtimeError(error),
           devicePixelRatio: 0.8,
           frameworkUrl,
           codeUrl,
           dataPartUrls: numberedUrls(dataBase, 'hk.data', DATA_PART_COUNT),
           mountDataParts: async (module, urls) => {
+            lifecycle.bind(module);
             await mountUnityDataParts(module, urls, {
               partSize: DATA_PART_SIZE,
               totalSize: DATA_TOTAL_SIZE,
@@ -573,6 +583,7 @@
 
         installHollowKnightPersistence(instance.Module);
         installHollowKnightKeyboardBridge(canvas);
+        lifecycle.ready();
 
         updateDataProgress();
 
