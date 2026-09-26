@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.09.25-r3';
+  const FS_VERSION = '2026.09.25-r4';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -838,9 +838,11 @@
     }, 2000);
 
     const flush = () => {
-      if (dirty && !inFlight) {
-        try { FS.syncfs(false, () => {}); } catch (_) {}
-      }
+      // visibilitychange and pagehide often arrive together. Use the same
+      // serialized dirty/inFlight path as ordinary saves, not a second sync.
+      if (timer) view.clearTimeout(timer);
+      timer = null;
+      runSync();
     };
 
     view.addEventListener('pagehide', flush);
@@ -978,4 +980,403 @@
   global.mountUnityDataParts = mountUnityDataParts;
   global.installHollowKnightPersistence = installHollowKnightPersistence;
   global.installHollowKnightKeyboardBridge = installHollowKnightKeyboardBridge;
+})(window);
+
+// r4: coordinate the surviving Unity instance across browser suspension.
+// This does not recreate a lost GPU context or revive an OS-terminated page.
+(function (global) {
+  'use strict';
+  const VERSION = '2026.09.25-r4';
+  const AUDIO_WAIT_MS = 5000;
+
+  // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
+  // framework and the WASM remain unchanged. Reject a different glue layout;
+  // never silently launch with missing lifecycle hooks.
+  global.prepareHollowKnightFramework = function (source) {
+    const entry = 'function unityFramework(Module) {';
+    const tick = '"suspended"===WEBAudio.audioContext.state?WEBAudio.audioContext.resume():Module.clearInterval(e)';
+    const resume = 'function _JS_Sound_ResumeIfNeeded(){0!=WEBAudio.audioWebEnabled&&"suspended"===WEBAudio.audioContext.state&&WEBAudio.audioContext.resume()}';
+    const ended = 'this.source.onended=function(){e&&dynCall("vi",e,[i]),o.setup()}';
+    for (const marker of [entry, tick, resume, ended]) {
+      if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
+        throw new Error('Unexpected Unity framework layout; suspend/resume hooks were not applied.');
+      }
+    }
+    const bridge = '\nModule.__hkRuntime = {' +
+      'version:"' + VERSION + '",' +
+      'get loop(){return Browser.mainLoop;},' +
+      'get audio(){return WEBAudio.audioWebEnabled ? WEBAudio.audioContext : null;},' +
+      'get aborted(){return Boolean(ABORT);},' +
+      'get callbacksAllowed(){return Browser.allowAsyncCallbacks;},' +
+      'get contextRestoreRegistered(){' +
+        'for(var i=0;i<JSEvents.eventHandlers.length;i++){' +
+          'var h=JSEvents.eventHandlers[i];' +
+          'if(h.target===Module.canvas && h.eventTypeString==="webglcontextrestored" && h.callbackfunc)return true;' +
+        '}return false;' +
+      '},' +
+      'pauseCallbacks:function(){Browser.pauseAsyncCallbacks();},' +
+      'resumeCallbacks:function(){' +
+        'Browser.allowAsyncCallbacks=true;' +
+        'var q=Browser.queuedAsyncCallbacks,i=0;Browser.queuedAsyncCallbacks=[];' +
+        'try{while(i<q.length && Browser.allowAsyncCallbacks && !Module.__hkLifecycle.state.paused && !ABORT){q[i++]();}}' +
+        'finally{if(i<q.length)Browser.queuedAsyncCallbacks=q.slice(i).concat(Browser.queuedAsyncCallbacks);}' +
+      '},' +
+      'audioEnded:function(fn){' +
+        'if(Module.__hkLifecycle.state.paused || !Browser.allowAsyncCallbacks)Browser.queuedAsyncCallbacks.push(fn);else fn();' +
+      '}' +
+      '};\n';
+    return source.replace(entry, entry + bridge)
+      .replace(tick, 'Module.__hkLifecycle.audioTick(e)')
+      .replace(resume, 'function _JS_Sound_ResumeIfNeeded(){Module.__hkLifecycle.requestAudioResume()}')
+      .replace(ended, 'this.source.onended=function(){Module.__hkRuntime.audioEnded(function(){e&&dynCall("vi",e,[i]),o.setup()})}');
+  };
+
+  global.installHollowKnightLifecycle = function (canvas) {
+    if (global.__hkLifecycle) return global.__hkLifecycle;
+    const doc = canvas.ownerDocument;
+    const view = doc.defaultView;
+    const documents = [doc];
+    const views = [view];
+    // The launcher uses same-origin srcdoc + Blob frames. Parent pagehide may
+    // arrive before child visibilitychange; observe each accessible ancestor.
+    for (let current = view; current.parent && current.parent !== current;) {
+      try {
+        const parent = current.parent;
+        documents.push(parent.document);
+        views.push(parent);
+        current = parent;
+      } catch (_) { break; } // Cross-origin ancestor: child visibility still applies.
+    }
+    const hiddenViews = new Set();
+    const frozenDocuments = new Set();
+    const state = {
+      version: VERSION, phase: 'starting', paused: false, ready: false,
+      reason: '', fatal: '', graphicsPending: false, audioState: 'uninitialized', lastError: '',
+      suspends: 0, resumes: 0, events: [], storageError: '', previous: null
+    };
+    let module = null, runtime = null, audio = null;
+    let ownLoopPause = false, ownCallbacksPause = false;
+    let epoch = 0, disposed = false, pendingAudio = null;
+    let panel = null, title = null, text = null, button = null, details = null;
+    const storageKey = 'hk.lifecycle.last';
+    try { state.previous = JSON.parse(view.sessionStorage.getItem(storageKey) || 'null'); }
+    catch (error) { state.storageError = String(error.message || error); }
+
+    function hidden() {
+      if (hiddenViews.size > 0 || frozenDocuments.size > 0) return true;
+      for (let index = 0; index < documents.length; index += 1) {
+        if (documents[index].hidden) return true;
+      }
+      return false;
+    }
+
+    function report() {
+      const stats = global.__hkLazyStats;
+      return {
+        version: VERSION, phase: state.phase, reason: state.reason, fatal: state.fatal,
+        hidden: hidden(), graphicsPending: state.graphicsPending, audioState: audio ? audio.state : state.audioState,
+        lastError: state.lastError, storageError: state.storageError,
+        heapBytes: module && module.HEAPU8 ? module.HEAPU8.byteLength : 0,
+        contextLost: Boolean(module && module.ctx && module.ctx.isContextLost()),
+        fsError: stats ? stats.lastError : '',
+        fsSyncLoads: stats ? stats.syncPartLoads : 0,
+        fsSyncBlockedMs: stats ? stats.syncBlockedMs : 0,
+        events: state.events.slice()
+      };
+    }
+
+    function record(event) {
+      state.events.push({ event, at: Math.round(view.performance.now()) });
+      if (state.events.length > 24) state.events.shift();
+      try { view.sessionStorage.setItem(storageKey, JSON.stringify(report())); }
+      catch (error) { state.storageError = String(error.message || error); }
+    }
+
+    function show() {
+      if (!state.paused || hidden() || disposed) return;
+      if (!panel) {
+        panel = doc.createElement('div');
+        panel.id = 'hk-resume-panel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-modal', 'true');
+        panel.setAttribute('aria-labelledby', 'hk-resume-title');
+        panel.style.cssText = 'position:fixed;inset:0;z-index:2147483645;display:grid;' +
+          'place-content:center;background:rgba(16,16,24,.94);color:#fff;' +
+          'padding:24px;box-sizing:border-box;font:16px/1.5 system-ui,sans-serif;text-align:center';
+        const box = doc.createElement('div');
+        box.style.cssText = 'max-width:480px;width:100%';
+        title = doc.createElement('h2'); title.id = 'hk-resume-title';
+        title.style.cssText = 'font-size:22px;margin:0 0 12px';
+        text = doc.createElement('p'); text.id = 'hk-resume-message';
+        button = doc.createElement('button'); button.id = 'hk-resume-button'; button.type = 'button';
+        button.style.cssText = 'font:600 16px system-ui;padding:12px 28px;cursor:pointer;margin:10px 0';
+        button.addEventListener('click', resume);
+        const diagnostic = doc.createElement('details'); diagnostic.style.cssText = 'text-align:left;margin-top:18px';
+        const summary = doc.createElement('summary'); summary.textContent = 'Diagnostic details';
+        details = doc.createElement('textarea'); details.readOnly = true; details.rows = 10;
+        details.style.cssText = 'box-sizing:border-box;width:100%;margin-top:8px;font:11px monospace';
+        details.setAttribute('aria-label', 'Suspend/resume diagnostic details');
+        diagnostic.addEventListener('toggle', () => { if (diagnostic.open) details.value = JSON.stringify(report(), null, 2); });
+        diagnostic.appendChild(summary); diagnostic.appendChild(details);
+        box.appendChild(title); box.appendChild(text); box.appendChild(button); box.appendChild(diagnostic);
+        panel.appendChild(box); doc.body.appendChild(panel);
+      }
+      panel.style.display = 'grid';
+      title.textContent = state.fatal ? 'Game stopped' : 'Game paused';
+      text.textContent = state.fatal ? state.lastError + ' Reopen Hollow Knight through Game Library. Existing saved data has not been deleted.' :
+        state.graphicsPending ? 'Waiting for Unity to restore the graphics context. The game remains paused.' :
+        state.phase === 'resuming' ? 'Resuming audio and game…' :
+        state.lastError ? state.lastError + ' Tap Resume to retry.' :
+        'Safari interrupted the session. Tap Resume when you are ready to continue.';
+      button.textContent = state.phase === 'resuming' ? 'Resuming…' : 'Resume';
+      button.hidden = Boolean(state.fatal);
+      button.disabled = !state.ready || state.graphicsPending || state.phase === 'resuming';
+      details.value = JSON.stringify(report(), null, 2);
+    }
+
+    function captureAudio() {
+      const next = runtime && runtime.audio;
+      if (!next || next === audio) return;
+      if (audio) audio.removeEventListener('statechange', audioChanged);
+      audio = next;
+      state.audioState = audio.state;
+      audio.addEventListener('statechange', audioChanged);
+      if (audio.state === 'interrupted' && !state.paused) pause('audio-interrupted');
+    }
+
+    function suspendAudio() {
+      if (!audio || audio.state === 'closed' || audio.state === 'suspended') return;
+      // Do not close/recreate AudioContext: that invalidates Unity's node graph.
+      try {
+        Promise.resolve(audio.suspend()).catch(error => {
+          state.lastError = 'Audio suspension failed: ' + String(error.message || error);
+          record('audio-suspend-error'); show();
+        });
+      } catch (error) {
+        state.lastError = 'Audio suspension failed: ' + String(error.message || error);
+        record('audio-suspend-error'); show();
+      }
+    }
+
+    function quiesce() {
+      if (!runtime) return;
+      const loop = runtime.loop;
+      // Only resume a loop that this controller actually paused. This also
+      // invalidates stale scheduled callbacks via Emscripten's generation ID.
+      if (!ownLoopPause && loop.func && loop.scheduler) {
+        ownLoopPause = true; loop.pause();
+      }
+      if (!ownCallbacksPause && runtime.callbacksAllowed) {
+        ownCallbacksPause = true; runtime.pauseCallbacks();
+      }
+      captureAudio(); suspendAudio();
+      if (global.__hkNeighborPreload) global.__hkNeighborPreload.suspend();
+    }
+
+    function pause(reason) {
+      if (disposed) return;
+      // Invalidate an unfinished resume on EVERY new suspension event.
+      epoch += 1;
+      if (!state.paused) state.suspends += 1;
+      state.paused = true;
+      if (!state.fatal) {
+        state.reason = reason;
+        state.phase = hidden() ? 'hidden' : state.graphicsPending ? 'waiting-for-graphics' : 'awaiting-resume';
+      }
+      quiesce(); record(reason); show();
+    }
+
+    function fail(code, message) {
+      if (disposed || state.fatal) return;
+      state.fatal = code; state.lastError = message;
+      state.phase = 'failed'; state.reason = code;
+      pause(code);
+      console.error('Hollow Knight stopped:', code, message);
+    }
+
+    function audioChanged() {
+      state.audioState = audio.state;
+      if (state.paused || hidden()) {
+        if (audio.state === 'running' && state.phase !== 'resuming') suspendAudio();
+      } else if (audio.state === 'interrupted') {
+        pause('audio-interrupted');
+      }
+      // A statechange need not mean the game can resume. Only an explicit
+      // successful Resume attempt releases the game and deferred callbacks.
+    }
+
+    function requestAudioResume() {
+      captureAudio();
+      if (!audio || audio.state === 'running' || audio.state === 'closed' ||
+          state.paused || hidden() || pendingAudio || disposed) return;
+      try {
+        const task = Promise.resolve(audio.resume());
+        pendingAudio = task;
+        task.catch(error => {
+          state.lastError = 'Audio resume failed: ' + String(error.message || error);
+          record('audio-auto-resume-error');
+        }).finally(() => { if (pendingAudio === task) pendingAudio = null; });
+      } catch (error) {
+        state.lastError = 'Audio resume failed: ' + String(error.message || error);
+        record('audio-auto-resume-error');
+      }
+    }
+
+    async function resume() {
+      if (disposed || !state.paused || !state.ready || hidden() || state.fatal || state.graphicsPending || state.phase === 'resuming') return false;
+      if (runtime.aborted || global.__hkLastReadFailure) {
+        fail('runtime-failed', 'Unity has already reported a fatal error.'); return false;
+      }
+      if (module.ctx && module.ctx.isContextLost()) {
+        contextLost(); return false;
+      }
+      const token = ++epoch;
+      state.phase = 'resuming'; state.lastError = '';
+      record('resume-request'); show(); captureAudio();
+      let timer = null, releasedEngine = false;
+      try {
+        if (audio && audio.state !== 'running') {
+          if (audio.state === 'closed') throw new Error('The game’s audio context has closed.');
+          // Call resume synchronously IN the click handler. An earlier autoplay
+          // request may remain pending on iOS; do not reuse that old Promise.
+          const task = Promise.resolve(audio.resume());
+          await Promise.race([task, new Promise((_, reject) => {
+            timer = view.setTimeout(() => reject(new Error('Safari has not resumed audio yet.')), AUDIO_WAIT_MS);
+          })]);
+          if (audio.state !== 'running') throw new Error('Safari is still interrupting audio.');
+        }
+        if (token !== epoch || hidden() || disposed || state.fatal) return false;
+        if (runtime.aborted || global.__hkLastReadFailure) throw new Error('Unity reported an error during resume.');
+        if (module.ctx && module.ctx.isContextLost()) {
+          contextLost(); return false;
+        }
+        // The GPU/audio checks complete before any suspended engine work runs.
+        releasedEngine = true;
+        state.paused = false; state.phase = 'running'; state.reason = ''; 
+        if (ownCallbacksPause) { ownCallbacksPause = false; runtime.resumeCallbacks(); }
+        if (runtime.aborted && !state.fatal) fail('runtime-failed', 'Unity stopped while resuming callbacks.');
+        if (state.paused || state.fatal) return false;
+        if (ownLoopPause) { ownLoopPause = false; runtime.loop.resume(); }
+        if (global.__hkNeighborPreload) global.__hkNeighborPreload.resume();
+        state.resumes += 1; record('resume-complete');
+        doc.dispatchEvent(new view.Event('hk-game-resumed'));
+        if (panel) panel.style.display = 'none';
+        canvas.focus({ preventScroll: true });
+        return true;
+      } catch (error) {
+        if (token !== epoch || disposed || state.fatal) return false;
+        if (releasedEngine) {
+          fail('resume-callback-error', String(error.message || error)); return false;
+        }
+        state.paused = true; state.phase = 'awaiting-resume';
+        state.lastError = String(error.message || error);
+        quiesce(); record('resume-failed'); show();
+        return false;
+      } finally {
+        if (timer !== null) view.clearTimeout(timer);
+      }
+    }
+
+    function visibility() {
+      if (hidden()) pause('visibility-hidden');
+      else if (state.paused) {
+        if (!state.fatal && state.phase !== 'resuming') state.phase = state.graphicsPending ? 'waiting-for-graphics' : 'awaiting-resume';
+        record('visible'); show();
+      }
+    }
+    function pagehide(event) { hiddenViews.add(event.currentTarget); pause('pagehide'); }
+    function pageshow(event) { hiddenViews.delete(event.currentTarget); visibility(); }
+    function freeze(event) { frozenDocuments.add(event.currentTarget); pause('freeze'); }
+    function thaw(event) { frozenDocuments.delete(event.currentTarget); visibility(); }
+    function contextLost() {
+      // Preserve an existing native Unity restoration path, when registered.
+      // Never synthesize GPU resources or assume a restored buffer is enough.
+      if (runtime && runtime.contextRestoreRegistered && !state.fatal) {
+        state.graphicsPending = true;
+        pause('webgl-context-lost');
+      } else {
+        fail('webgl-context-lost', 'Safari lost the game’s graphics resources; this instance has no registered Unity restoration handler.');
+      }
+    }
+    function contextRestored() {
+      // Our listener is installed first. Wait until Unity's own event handlers
+      // have run before allowing a Resume tap. Do not preempt their recovery.
+      Promise.resolve().then(() => {
+        if (disposed) return;
+        record('webgl-context-restored');
+        if (state.graphicsPending && !state.fatal) {
+          if (!runtime.contextRestoreRegistered || runtime.aborted) {
+            fail('graphics-restore-failed', 'Unity could not complete its graphics restoration.');
+          } else if (module.ctx && !module.ctx.isContextLost()) {
+            state.graphicsPending = false;
+            state.phase = hidden() ? 'hidden' : 'awaiting-resume';
+          }
+        }
+        show();
+      });
+    }
+
+    const controller = {
+      version: VERSION, state, report, resume, pause, requestAudioResume,
+      bind(unityModule) {
+        module = unityModule; runtime = module.__hkRuntime;
+        if (!runtime || runtime.version !== VERSION) throw new Error('Unity suspend/resume bridge is unavailable.');
+        module.__hkLifecycle = controller;
+        if (state.paused || hidden()) pause('bind-hidden');
+      },
+      beforeFrame() {
+        if (disposed) return false;
+        if (hidden() && !state.paused) pause('frame-hidden');
+        if (state.paused) { quiesce(); return false; }
+        if (!audio) captureAudio();
+        return !state.paused;
+      },
+      audioTick(timer) {
+        captureAudio();
+        if (audio && audio.state === 'running') module.clearInterval(timer);
+        else requestAudioResume();
+      },
+      ready() {
+        state.ready = true;
+        if (state.paused || hidden()) { if (!state.paused) pause('ready-hidden'); show(); }
+        else { state.phase = 'running'; record('ready'); }
+      },
+      runtimeError(error) {
+        fail('unity-error', String(error && error.message ? error.message : error));
+        return true; // Replaced popup with explicit fatal panel, not a recovery.
+      },
+      cleanup() {
+        if (disposed) return;
+        pause('cleanup'); disposed = true; state.phase = 'disposed';
+        for (const documentRef of documents) {
+          documentRef.removeEventListener('visibilitychange', visibility, true);
+          documentRef.removeEventListener('freeze', freeze, true);
+          documentRef.removeEventListener('resume', thaw, true);
+        }
+        for (const windowRef of views) {
+          windowRef.removeEventListener('pagehide', pagehide, true);
+          windowRef.removeEventListener('pageshow', pageshow, true);
+        }
+        canvas.removeEventListener('webglcontextlost', contextLost, true);
+        canvas.removeEventListener('webglcontextrestored', contextRestored, true);
+        if (audio) audio.removeEventListener('statechange', audioChanged);
+        if (panel) panel.remove();
+        if (global.__hkLifecycle === controller) delete global.__hkLifecycle;
+      }
+    };
+    for (const documentRef of documents) {
+      documentRef.addEventListener('visibilitychange', visibility, true);
+      documentRef.addEventListener('freeze', freeze, true);
+      documentRef.addEventListener('resume', thaw, true);
+    }
+    for (const windowRef of views) {
+      windowRef.addEventListener('pagehide', pagehide, true);
+      windowRef.addEventListener('pageshow', pageshow, true);
+    }
+    canvas.addEventListener('webglcontextlost', contextLost, true);
+    canvas.addEventListener('webglcontextrestored', contextRestored, true);
+    global.__hkLifecycle = controller;
+    if (hidden()) pause('initially-hidden');
+    return controller;
+  };
 })(window);
