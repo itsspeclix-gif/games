@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.09.25-r2';
+  const FS_VERSION = '2026.09.25-r3';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -317,6 +317,9 @@
     // Remember only URL strings after recovery, not additional data buffers.
     // An evicted recovered part must not revisit a known-bad cached URL.
     const preferredUrls = urls.slice();
+    // The preloader must warm the same URL as synchronous reads, including
+    // remembered recovery URLs. Expose strings, never cache data/buffers.
+    module.__hkDataPartUrl = partIndex => preferredUrls[partIndex];
     const cache = new Map();
     const demandedParts = new Set();
     const touchedFiles = new Set();
