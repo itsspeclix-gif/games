@@ -67,13 +67,13 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.09.25-r2</div>
+    <div id="build-version">Version: HK-WebGL 2026.09.25-r3</div>
     <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.09.25-r2';
-    const BUILD_TOKEN = '2026.09.25-r2';
+    const BUILD_VERSION = 'HK-WebGL 2026.09.25-r3';
+    const BUILD_TOKEN = '2026.09.25-r3';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
     const DATA_FALLBACK_BASE =
@@ -432,6 +432,52 @@
       return frameworkObjectUrl;
     }
 
+    let preloadModule = null;
+    let preloadUrls = null;
+    let preloadInstallTask = null;
+    let preloadRetryTimer = null;
+
+    function installNeighborPreload() {
+      if (preloadInstallTask) return preloadInstallTask;
+      if (!preloadModule || document.hidden) return Promise.resolve();
+      if (preloadRetryTimer !== null) clearTimeout(preloadRetryTimer);
+      preloadRetryTimer = null;
+      preloadInstallTask = installHollowKnightNeighborPreload({ Module: preloadModule }, {
+        mapUrl: buildBase + 'preload-analysis/preload-map.analysis.json',
+        dataPartUrls: preloadUrls,
+        partSize: DATA_PART_SIZE
+      }).then(() => {
+        delete window.__hkPreloadError;
+        const notice = document.getElementById('preload-warning');
+        if (notice) notice.remove();
+        document.removeEventListener('visibilitychange', installNeighborPreload);
+        window.removeEventListener('online', installNeighborPreload);
+        preloadModule = preloadUrls = null;
+      }).catch(error => {
+        reportPreloadError(error);
+        // Metadata initialization failures must not leave an otherwise healthy
+        // game permanently without preloading. No retries while hidden.
+        preloadRetryTimer = setTimeout(installNeighborPreload, 60000);
+      }).finally(() => { preloadInstallTask = null; });
+      return preloadInstallTask;
+    }
+
+    function reportPreloadError(error) {
+      window.__hkPreloadError = error && error.message ? error.message : String(error);
+      console.warn('Neighbor preload unavailable:', error);
+      let notice = document.getElementById('preload-warning');
+      if (!notice) {
+        notice = document.createElement('div');
+        notice.id = 'preload-warning';
+        notice.setAttribute('role', 'status');
+        notice.style.cssText = 'position:fixed;bottom:8px;left:8px;right:8px;z-index:20;' +
+          'padding:6px 9px;color:#fff;background:rgba(0,0,0,.75);font:12px system-ui;' +
+          'pointer-events:none';
+        document.body.appendChild(notice);
+      }
+      notice.textContent = 'Neighbor preloading unavailable; room changes may be slower.';
+    }
+
     async function startGame() {
       try {
         setRetryStatus('');
@@ -460,9 +506,11 @@
             'preloader'
           );
           neighborPreloadReady =
-            typeof window.installHollowKnightNeighborPreload === 'function';
+            typeof window.installHollowKnightNeighborPreload === 'function' &&
+            window.__hkPreloadVersion === BUILD_TOKEN;
+          if (!neighborPreloadReady) throw new Error('Preloader update is still cached. Purge its CDN URL and reopen.');
         } catch (error) {
-          console.warn('Neighbor preload helper unavailable:', error);
+          reportPreloadError(error);
         }
 
         codeUrl = await joinParts(
@@ -482,14 +530,24 @@
           frameworkUrl,
           codeUrl,
           dataPartUrls: numberedUrls(dataBase, 'hk.data', DATA_PART_COUNT),
-          mountDataParts: (module, urls) =>
-            mountUnityDataParts(module, urls, {
+          mountDataParts: async (module, urls) => {
+            await mountUnityDataParts(module, urls, {
               partSize: DATA_PART_SIZE,
               totalSize: DATA_TOTAL_SIZE,
               onProgress: updateMountProgress,
               fallbackUrls: numberedUrls(DATA_FALLBACK_BASE, 'hk.data', DATA_PART_COUNT),
               onReadError: reportDataReadError
-            })
+            });
+            // Install while the loader's data dependency is still held, BEFORE
+            // Unity can open its first room. A late post-start hook misses them.
+            if (neighborPreloadReady) {
+              preloadModule = module;
+              preloadUrls = urls;
+              document.addEventListener('visibilitychange', installNeighborPreload);
+              window.addEventListener('online', installNeighborPreload);
+              await installNeighborPreload();
+            }
+          }
         };
 
         const restoreStartupFetch =
@@ -515,17 +573,6 @@
 
         installHollowKnightPersistence(instance.Module);
         installHollowKnightKeyboardBridge(canvas);
-
-        if (neighborPreloadReady) {
-          installHollowKnightNeighborPreload(instance, {
-            mapUrl: buildBase + 'preload-analysis/preload-map.analysis.json',
-            dataPartUrls: unityConfig.dataPartUrls,
-            partSize: DATA_PART_SIZE,
-            preloadConcurrency: 1
-          }).catch(error => {
-            console.warn('Neighbor preload disabled:', error);
-          });
-        }
 
         updateDataProgress();
 
