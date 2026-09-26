@@ -4,6 +4,12 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
+  const FS_VERSION = '2026.09.25-r2';
+  // Captured before index.html installs its startup-only fetch wrapper, so
+  // bootstrap has one bounded retry loop covering headers AND body reads.
+  const dataFetch = global.fetch.bind(global);
+  let retrySerial = 0;
+  global.__hkStabilityFSVersion = FS_VERSION;
 
   function errorText(error) {
     return error && error.message ? error.message : String(error);
@@ -100,102 +106,164 @@
     }
   }
 
-  async function fetchBytes(url) {
-    const response = await fetch(url, { cache: 'force-cache' });
-    if (!response.ok) {
-      throw new Error('Could not load ' + url + ' (' + response.status + ')');
-    }
-    return new Uint8Array(await response.arrayBuffer());
+  function requestUrl(url, attempt, fallbackUrl) {
+    if (attempt === 0) return url; // Preserve the normal preloader/cache key.
+    const result = new URL(
+      attempt === 2 && fallbackUrl ? fallbackUrl : url,
+      document.baseURI
+    );
+    // Query-only retry: no custom headers (and no CORS preflight).
+    result.searchParams.set(
+      'hk_read_retry', Date.now().toString(36) + '-' + (++retrySerial)
+    );
+    return result.href;
   }
 
-  function syncWhole(url, stats) {
-    const started = performance.now();
-    const maxAttempts = 3;
-    const partName = url.split('/').pop() || url;
-    let lastError = null;
-    let lastStatus = 0;
+  function dataFailure(message, detail) {
+    const error = new Error(message);
+    error.name = 'HollowKnightDataError';
+    error.hkDataIO = true;
+    error.detail = detail;
+    return error;
+  }
 
-    stats.activePart = partName;
-    stats.phase = 'sync-read';
-    setMessage('Streaming ' + partName + '…');
+  function checkResponse(status, actual, expected, url, attempt) {
+    const detail = { url, attempt: attempt + 1, status, expected, actual };
+    // A cached success is delivered as HTTP 200. Bare 304, status 0, 204,
+    // partial 206, and wrong-sized bodies are not valid whole-file responses.
+    if (status !== 200) {
+      throw dataFailure('StabilityFS HTTP ' + status + ' for ' + url, detail);
+    }
+    if (actual !== expected) {
+      throw dataFailure(
+        'StabilityFS: expected ' + expected + ' bytes, got ' + actual +
+        ' for ' + url, detail
+      );
+    }
+  }
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      let xhr = new XMLHttpRequest();
-      let text = '';
+  function rememberAttempt(stats, error, detail) {
+    const failure = Object.assign({}, detail, { message: errorText(error) });
+    stats.lastTransportFailure = failure; // One bounded record, not a log.
+    if (detail.actual !== null && detail.actual !== detail.expected) {
+      stats.lengthFailures += 1;
+    }
+    return failure;
+  }
 
+  async function fetchBytes(url, expected, stats, fallbackUrl, validate) {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const targetUrl = requestUrl(url, attempt, fallbackUrl);
+      const detail = {
+        url: targetUrl, attempt: attempt + 1,
+        status: 0, expected, actual: null
+      };
+      if (attempt > 0) {
+        stats.bootstrapRetries += 1;
+        setMessage('Retrying archive index (' + (attempt + 1) + '/3)…');
+        await new Promise(resolve => global.setTimeout(resolve, attempt * 600));
+      }
+      let response;
       try {
-        xhr.open('GET', url, false);
-
-        if (xhr.overrideMimeType) {
-          xhr.overrideMimeType('text/plain; charset=x-user-defined');
+        response = await dataFetch(targetUrl, {
+          cache: attempt === 0 ? 'force-cache' : 'reload'
+        });
+        detail.status = response.status;
+        if (response.status !== 200) {
+          checkResponse(response.status, null, expected, targetUrl, attempt);
         }
-
-        xhr.send(null);
-
-        lastStatus = xhr.status;
-
-        const statusOkay =
-          (xhr.status >= 200 && xhr.status < 300) ||
-          xhr.status === 304 ||
-          xhr.status === 0;
-
-        if (!statusOkay) {
-          lastError = new Error(
-            'StabilityFS HTTP ' + xhr.status + ' for ' + url
-          );
-        } else {
-          text = xhr.responseText || '';
-          const bytes = new Uint8Array(text.length);
-
-          for (let index = 0; index < text.length; index += 1) {
-            bytes[index] = text.charCodeAt(index) & 255;
-          }
-
-          stats.syncPartLoads += 1;
-          stats.syncBytes += bytes.byteLength;
-          stats.syncBlockedMs += performance.now() - started;
-          stats.activePart = '';
-
-          text = '';
-          xhr = null;
-
-          return bytes;
-        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        detail.actual = bytes.byteLength;
+        checkResponse(response.status, bytes.byteLength, expected, targetUrl, attempt);
+        if (validate) validate(bytes);
+        if (attempt > 0) stats.bootstrapRecovered += 1;
+        if (attempt === 2 && fallbackUrl) stats.fallbackLoads += 1;
+        return { bytes, url: targetUrl };
       } catch (error) {
-        lastError = new Error(
-          'StabilityFS whole-file XHR failed: ' + errorText(error)
+        lastError = dataFailure(
+          'StabilityFS bootstrap failed: ' + errorText(error),
+          rememberAttempt(stats, error, detail)
         );
-      }
-
-      xhr = null;
-      text = '';
-
-      if (attempt < maxAttempts) {
-        stats.syncRetries += 1;
-        stats.phase = 'sync-retry';
-
-        setMessage(
-          'Connection interrupted — retrying ' +
-          partName +
-          ' (' +
-          (attempt + 1) +
-          '/' +
-          maxAttempts +
-          ')…'
-        );
+        try {
+          if (response && response.body) await response.body.cancel();
+        } catch (_) {}
       }
     }
+    stats.lastError = lastError.message;
+    throw lastError;
+  }
 
-    stats.syncBlockedMs += performance.now() - started;
-    stats.activePart = '';
+  function syncWhole(url, expected, stats, fallbackUrl) {
+    const started = performance.now();
+    const partName = url.split('?')[0].split('/').pop() || url;
+    let lastError;
+    stats.activePart = partName;
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const targetUrl = requestUrl(url, attempt, fallbackUrl);
+        const detail = {
+          url: targetUrl, attempt: attempt + 1,
+          status: 0, expected, actual: null
+        };
+        stats.phase = attempt ? 'sync-retry' : 'sync-read';
+        if (attempt) stats.syncRetries += 1;
+        setMessage(attempt
+          ? 'Connection interrupted — retrying ' + partName +
+            ' (' + (attempt + 1) + '/3)…'
+          : 'Streaming ' + partName + '…');
+        let xhr = null;
+        let text = '';
+        try {
+          xhr = new XMLHttpRequest();
+          xhr.open('GET', targetUrl, false);
+          // Do not set responseType=arraybuffer or timeout on a synchronous
+          // main-thread XHR. Keep the established Safari binary-text path.
+          xhr.overrideMimeType('text/plain; charset=x-user-defined');
+          xhr.send(null);
+          detail.status = xhr.status;
+          if (xhr.status !== 200) {
+            checkResponse(xhr.status, null, expected, targetUrl, attempt);
+          }
+          text = xhr.responseText || '';
+          detail.actual = text.length;
+          checkResponse(xhr.status, text.length, expected, targetUrl, attempt);
+        } catch (error) {
+          stats.syncAttemptFailures += 1;
+          lastError = dataFailure(
+            'StabilityFS data request failed: ' + errorText(error),
+            rememberAttempt(stats, error, detail)
+          );
+          continue;
+        } finally {
+          xhr = null;
+        }
 
-    if (lastError) {
+        // Allocate only after exact length validation. Allocation failures
+        // must not trigger three repeated downloads/allocation attempts.
+        let bytes;
+        try {
+          bytes = new Uint8Array(expected);
+        } catch (error) {
+          const failure = new Error('StabilityFS: chunk allocation failed: ' + errorText(error));
+          failure.hkAllocationFailure = true;
+          throw failure;
+        }
+        for (let index = 0; index < expected; index += 1) {
+          bytes[index] = text.charCodeAt(index) & 255;
+        }
+        text = '';
+        stats.syncPartLoads += 1;
+        stats.syncBytes += bytes.byteLength;
+        if (attempt) stats.syncRecovered += 1;
+        if (attempt === 2 && fallbackUrl) stats.fallbackLoads += 1;
+        return { bytes, url: targetUrl };
+      }
       throw lastError;
+    } finally {
+      stats.syncBlockedMs += performance.now() - started;
+      stats.activePart = '';
     }
-
-    throw new Error(
-      'StabilityFS HTTP ' + lastStatus + ' for ' + url
-    );
   }
 
   async function mountUnityDataParts(module, urls, options) {
@@ -241,12 +309,21 @@
     partLengths[partLengths.length - 1] = finalPartSize;
 
     const FS = module.__FS;
+    const fallbackUrls = settings.fallbackUrls || [];
+    if (!Array.isArray(fallbackUrls) ||
+        (fallbackUrls.length !== 0 && fallbackUrls.length !== urls.length)) {
+      throw new Error('StabilityFS: fallback list must match the data parts');
+    }
+    // Remember only URL strings after recovery, not additional data buffers.
+    // An evicted recovered part must not revisit a known-bad cached URL.
+    const preferredUrls = urls.slice();
     const cache = new Map();
     const demandedParts = new Set();
     const touchedFiles = new Set();
     let residentBytes = 0;
 
     const stats = global.__hkLazyStats = {
+      version: FS_VERSION,
       phase: 'bootstrap',
       transport: 'whole-file',
       totalFiles: 0,
@@ -265,6 +342,15 @@
       evictions: 0,
       syncPartLoads: 0,
       syncRetries: 0,
+      syncAttemptFailures: 0,
+      syncRecovered: 0,
+      bootstrapRetries: 0,
+      bootstrapRecovered: 0,
+      lengthFailures: 0,
+      fallbackLoads: 0,
+      ioFailures: 0,
+      lastTransportFailure: null,
+      lastFailure: null,
       syncBytes: 0,
       syncBlockedMs: 0,
       opens: 0,
@@ -336,8 +422,22 @@
       const cached = cache.get(partIndex);
       if (cached) return touchPart(partIndex, cached);
 
-      const bytes = await fetchBytes(urls[partIndex]);
-      return storePart(partIndex, bytes);
+      evictFor(partLengths[partIndex]);
+      const result = await fetchBytes(
+        preferredUrls[partIndex], partLengths[partIndex], stats,
+        fallbackUrls[partIndex], partIndex === 0 ? bytes => {
+          validateMagic(bytes);
+          const headerEnd = new DataView(
+            bytes.buffer, bytes.byteOffset, bytes.byteLength
+          ).getUint32(MAGIC.length, true);
+          if (headerEnd < HEADER_PREFIX_SIZE || headerEnd > totalSize) {
+            throw new Error('StabilityFS: invalid header extent');
+          }
+          if (headerEnd <= bytes.byteLength) parseArchive(bytes, totalSize);
+        } : null
+      );
+      preferredUrls[partIndex] = result.url;
+      return storePart(partIndex, result.bytes);
     }
 
     async function readArchiveHeader(firstPart) {
@@ -408,7 +508,11 @@
 
       let bytes;
       try {
-        bytes = syncWhole(urls[partIndex], stats);
+        const result = syncWhole(
+          preferredUrls[partIndex], expected, stats, fallbackUrls[partIndex]
+        );
+        preferredUrls[partIndex] = result.url;
+        bytes = result.bytes;
       } catch (error) {
         stats.lastError = errorText(error);
         throw error;
@@ -417,13 +521,59 @@
       return storePart(partIndex, bytes);
     }
 
-    function readInto(entry, filePosition, length, target, targetOffset) {
-      if (length <= 0 || filePosition >= entry.size) return 0;
-      if (filePosition < 0) {
-        throw new Error('StabilityFS: negative file position for ' + entry.name);
+    function reportReadFailure(error, entry, operation, position, length) {
+      const previous = stats.lastFailure;
+      const detail = Object.assign({}, error && error.detail, {
+        kind: error && error.hkDataIO ? 'data-io' :
+          error && error.hkAllocationFailure ? 'allocation' : 'filesystem',
+        file: entry.name, operation, position, length,
+        message: errorText(error),
+        heapBytes: module.HEAPU8 ? module.HEAPU8.byteLength : null
+      });
+      stats.lastError = detail.message;
+      stats.lastFailure = detail;
+      global.__hkLastReadFailure = detail;
+      if (error && error.hkDataIO) stats.ioFailures += 1;
+      // Diagnostic hooks must never introduce another filesystem exception.
+      if (!previous || previous.message !== detail.message ||
+          previous.file !== detail.file || previous.position !== position) {
+        try { console.error('Hollow Knight data read failed:', detail); } catch (_) {}
+        try {
+          if (typeof settings.onReadError === 'function') settings.onReadError(detail);
+        } catch (_) {}
       }
+      // Use this build's Linux errno values, not modern WASI's numbering.
+      // This is a failed read, NEVER fake EOF, zero-fill or a successful count.
+      if (error instanceof FS.ErrnoError) return error;
+      if (error && (error.hkDataIO || error.hkAllocationFailure)) {
+        const fsError = new FS.ErrnoError(error.hkDataIO ? 5 : 12);
+        fsError.message = detail.message;
+        return fsError;
+      }
+      // Preserve unexpected programming failures, with a serializable message
+      // so the old framework's JSON.stringify(error) no longer erases it.
+      try {
+        Object.defineProperty(error, 'message', {
+          value: detail.message, enumerable: true, configurable: true
+        });
+      } catch (_) {}
+      return error;
+    }
+
+    function readInto(entry, filePosition, length, target, targetOffset) {
+      if (!Number.isSafeInteger(filePosition) || filePosition < 0 ||
+          !Number.isSafeInteger(length) || length < 0 ||
+          !Number.isSafeInteger(targetOffset) || targetOffset < 0) {
+        throw new FS.ErrnoError(22);
+      }
+      if (length === 0 || filePosition >= entry.size) return 0;
 
       let remaining = Math.min(length, entry.size - filePosition);
+      if (!target || typeof target.set !== 'function' ||
+          target.BYTES_PER_ELEMENT !== 1 ||
+          targetOffset > target.length || remaining > target.length - targetOffset) {
+        throw new FS.ErrnoError(14);
+      }
       let archiveOffset = entry.offset + filePosition;
       let destination = targetOffset;
 
@@ -513,8 +663,7 @@
             stats.readBytes += count;
             return count;
           } catch (error) {
-            stats.lastError = errorText(error);
-            throw error;
+            throw reportReadFailure(error, entry, 'read', position, length);
           } finally {
             stats.activeFile = '';
           }
@@ -524,32 +673,33 @@
           stats.activeFile = entry.name;
           stats.phase = 'mmap';
           stats.mmapCalls += 1;
-
-          const pointer = module._malloc(length);
-          if (!pointer) {
-            stats.lastError =
-              'StabilityFS: WASM malloc failed while mapping ' + entry.name;
-            stats.activeFile = '';
-            throw new FS.ErrnoError(12);
-          }
-
+          let pointer = 0;
           try {
-            const count = readInto(
-              entry,
-              position,
-              length,
-              buffer,
-              pointer
-            );
-            if (count < length) {
-              buffer.fill(0, pointer + count, pointer + length);
+            if (!Number.isSafeInteger(length) || length <= 0 ||
+                !Number.isSafeInteger(position) || position < 0) {
+              throw new FS.ErrnoError(22);
             }
+            pointer = module._malloc(length);
+            if (!pointer) {
+              const failure = new FS.ErrnoError(12);
+              failure.message = 'StabilityFS: WASM malloc failed while mapping ' + entry.name;
+              throw failure;
+            }
+            // _malloc can grow WASM memory and detach the caller's old view.
+            // Always acquire the current heap AFTER allocation.
+            const heap = module.HEAPU8;
+            if (!heap || pointer > heap.length || length > heap.length - pointer) {
+              throw new FS.ErrnoError(14);
+            }
+            const count = readInto(entry, position, length, heap, pointer);
+            // Zero only the legitimate mmap tail beyond the file's EOF.
+            // A transport failure throws before reaching this statement.
+            if (count < length) heap.fill(0, pointer + count, pointer + length);
             stats.mmapBytes += length;
             return { ptr: pointer, allocated: true };
           } catch (error) {
-            module._free(pointer);
-            stats.lastError = errorText(error);
-            throw error;
+            if (pointer) module._free(pointer);
+            throw reportReadFailure(error, entry, 'mmap', position, length);
           } finally {
             stats.activeFile = '';
           }
