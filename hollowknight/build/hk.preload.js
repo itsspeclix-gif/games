@@ -1,9 +1,12 @@
 (function () {
   'use strict';
 
-  const BUILD_VERSION = '2026.09.25-r4';
+  const BUILD_VERSION = '2026.09.26-r6';
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
   const DEFAULT_READ_WINDOW_MS = 1800;
+  // Scheduling policy, NOT a Unity scene-loaded event. Wait after scene
+  // identification or a source-cache MISS. Cached reads must not starve warming.
+  const ASSET_QUIET_MS = 1500;
   const WARM_TTL_MS = 120000;
   const RETRY_COOLDOWN_MS = 15000;
   const REQUEST_TIMEOUT_MS = 30000;
@@ -165,8 +168,9 @@
     const module = instance.Module;
     const FS = module.__FS;
     const stats = window.__hkLazyStats;
-    if (!FS || !stats || typeof module.__hkDataPartUrl !== 'function') {
-      throw new Error('Matching r3 Hollow Knight filesystem is required');
+    if (!FS || !stats || typeof module.__hkDataPartUrl !== 'function' ||
+        typeof module.__hkDataPartResident !== 'function') {
+      throw new Error('Matching Hollow Knight filesystem is required');
     }
     const partSize = Number(options.partSize) || DEFAULT_PART_SIZE;
     const recentReadWindowMs = Math.max(250, Number(options.recentReadWindowMs) || DEFAULT_READ_WINDOW_MS);
@@ -174,7 +178,14 @@
     if (!Array.isArray(dataPartUrls) || !dataPartUrls.length) throw new Error('Missing preload part URLs');
     const partCount = dataPartUrls.length;
     const state = {
-      currentScene: '', currentSource: '', lastLevelTime: -Infinity,
+      currentScene: '', currentSource: '',
+      lastDemandTime: performance.now(), demandDepth: 0, demandPauses: 0,
+      ignoredSceneHints: 0, sceneChanges: [],
+      demandedParts: new Set(), demandMisses: 0, preparedMisses: 0,
+      demandStart: 0, demandWaitMs: 0,
+      cacheEvidence: { observed: 0, cached: 0, network: 0, unknown: 0,
+        warmedCached: 0, warmedNetwork: 0, warmedUnknown: 0, transferBytes: 0 },
+      recentHTTPReads: [], timingStatus: 'unavailable',
       resourceToScene: new Map(), recentDataReads: [], candidateScene: '', candidateHits: 0,
       candidateTimer: null, warmController: null, warmedParts: new Map(),
       activeWarmParts: new Set(), failedParts: new Map(), learnedParts: new Map(),
@@ -256,6 +267,7 @@
     }
     const ranges = buildSceneRanges(FS, map);
     state.markerRanges = ranges.length;
+    const markerScenes = new Set(ranges.map(range => range.scene));
     const sceneParts = new Map();
     for (const [name, record] of Object.entries(map.scenes)) {
       if (record.resourceFile) state.resourceToScene.set(record.resourceFile.split('/').pop(), name);
@@ -294,14 +306,17 @@
     function scheduleWarmPass() {
       if (state.refreshTimer !== null) clearTimeout(state.refreshTimer);
       state.refreshTimer = null;
-      if (state.disposed || state.suspended || state.running || !state.desiredParts.size) return;
+      if (state.disposed || state.suspended || state.running || state.demandDepth || !state.desiredParts.size) return;
       let next = Infinity;
       for (const part of state.desiredParts) {
+        if (module.__hkDataPartResident(part - 1)) continue;
         const failure = state.failedParts.get(part);
         const warmed = state.warmedParts.get(part);
         next = Math.min(next, failure || (warmed && warmed.url === module.__hkDataPartUrl(part - 1)
           ? warmed.time + WARM_TTL_MS : performance.now()));
       }
+      if (!Number.isFinite(next)) return;
+      next = Math.max(next, state.lastDemandTime + ASSET_QUIET_MS);
       state.refreshTimer = setTimeout(() => {
         state.refreshTimer = null;
         warmNeighbors();
@@ -312,8 +327,10 @@
       if (state.running) return;
       state.running = true;
       try {
-        while (!state.disposed && !state.suspended && state.queue.length) {
+        while (!state.disposed && !state.suspended && state.queue.length &&
+               !state.demandDepth && performance.now() - state.lastDemandTime >= ASSET_QUIET_MS) {
           const part = state.queue.shift();
+          if (module.__hkDataPartResident(part - 1)) continue;
           const url = module.__hkDataPartUrl(part - 1);
           const warmed = state.warmedParts.get(part);
           if (warmed && warmed.url === url && performance.now() - warmed.time < WARM_TTL_MS) continue;
@@ -343,6 +360,7 @@
         state.running = false;
         state.status = state.disposed ? 'stopped' : state.suspended ? 'suspended' :
           !state.currentScene ? 'waiting-for-scene' :
+          state.demandDepth || performance.now() - state.lastDemandTime < ASSET_QUIET_MS ? 'waiting-for-assets' :
           [...state.desiredParts].some(part => state.failedParts.has(part)) ? 'retrying' : 'ready';
         scheduleWarmPass();
       }
@@ -357,7 +375,8 @@
       const now = performance.now();
       state.queue = parts.filter(part => {
         const warmed = state.warmedParts.get(part);
-        return !state.activeWarmParts.has(part) && !(state.failedParts.get(part) > now) &&
+        return !module.__hkDataPartResident(part - 1) &&
+          !state.activeWarmParts.has(part) && !(state.failedParts.get(part) > now) &&
           (!warmed || warmed.url !== module.__hkDataPartUrl(part - 1) || now - warmed.time >= WARM_TTL_MS);
       });
       for (const part of state.activeWarmParts) {
@@ -365,8 +384,39 @@
       }
       // A single runner owns ALL requests, even while an aborted body settles.
       // Replacing the queue cannot spawn a second worker.
-      if (state.queue.length) runWarmQueue().catch(error => reportError(error, { phase: 'queue' }));
-      else scheduleWarmPass();
+      if (state.queue.length && !state.demandDepth &&
+          now - state.lastDemandTime >= ASSET_QUIET_MS) {
+        runWarmQueue().catch(error => reportError(error, { phase: 'queue' }));
+      } else {
+        if (state.queue.length) state.status = 'waiting-for-assets';
+        else if (!state.running) state.status = state.currentScene ?
+          ([...state.desiredParts].some(part => state.failedParts.get(part) > now) ? 'retrying' : 'ready') : 'waiting-for-scene';
+        scheduleWarmPass();
+      }
+    }
+
+    function assetReadActivity(active, partIndex) {
+      // Called only on a source-cache MISS; source-cache hits never cancel a
+      // useful request. Begin/end are paired by the filesystem in finally.
+      state.lastDemandTime = performance.now();
+      state.demandDepth += active ? 1 : -1;
+      if (active) {
+        state.demandStart = state.lastDemandTime;
+        state.demandMisses += 1;
+        state.demandedParts.add(partIndex + 1);
+        const warmed = state.warmedParts.get(partIndex + 1);
+        if (warmed && warmed.url === module.__hkDataPartUrl(partIndex)) state.preparedMisses += 1;
+      } else state.demandWaitMs += performance.now() - state.demandStart;
+      if (state.disposed) return;
+      if (active) {
+        if (!state.suspended) state.status = 'waiting-for-assets';
+        if (state.warmController && !state.warmController.signal.aborted) {
+          state.demandPauses += 1;
+          state.warmController.abort();
+        }
+      } else if (!state.demandDepth && state.refreshTimer === null && !state.running) {
+        scheduleWarmPass();
+      }
     }
 
     function learnParts(parts) {
@@ -382,19 +432,26 @@
 
     function setCurrentScene(sceneName, source) {
       if (!getSceneRecord(sceneName)) return false;
-      if (source === 'level-block') state.lastLevelTime = performance.now();
-      if (source === 'resource' && sceneName !== state.currentScene &&
-          performance.now() - state.lastLevelTime < recentReadWindowMs) return false;
+      // Resource files and physical chunks can be SHARED DEPENDENCIES. They
+      // are hints, not scene-loaded events. Once a level block establishes a
+      // room, a weaker hint cannot replace it just because 1.8 seconds elapsed.
+      // For scenes with no exclusive level marker, retain the existing fallback.
+      if (sceneName !== state.currentScene && source !== 'level-block' &&
+          state.currentSource === 'level-block' && markerScenes.has(sceneName)) {
+        state.ignoredSceneHints += 1;
+        return false;
+      }
+      if (state.currentScene !== sceneName) state.lastDemandTime = performance.now();
       const changed = state.currentScene !== sceneName;
       state.currentScene = sceneName;
       if (changed || source === 'level-block' || state.currentSource !== 'level-block') state.currentSource = source;
       if (changed) {
         state.candidateScene = ''; state.candidateHits = 0;
-        // Recent completed reads include dependencies loaded before the level
-        // marker. Learning is bounded, session-only, and never alters game data.
-        for (const read of state.recentDataReads) {
-          if (read.parts.length <= MAX_LEARNED_PARTS) learnParts(read.parts);
-        }
+        // Do not assign the previous room's read history to this room.
+        // Only subsequent, actually consumed data can become a learned extra.
+        if (state.sceneChanges.length === 16) state.sceneChanges.shift();
+        state.sceneChanges.push({ scene: sceneName, source, time: performance.now() });
+        state.demandedParts.clear();
         state.recentDataReads.length = 0;
         warmNeighbors();
       }
@@ -538,18 +595,82 @@
       if (state.disposed || document.hidden || !state.suspended ||
           (module.__hkLifecycle && module.__hkLifecycle.state.paused)) return;
       state.suspended = false;
+      state.lastDemandTime = performance.now();
       state.recentDataReads.length = 0;
       state.candidateScene = ''; state.candidateHits = 0;
       state.warmedParts.clear(); state.failedParts.clear();
       warmNeighbors();
     }
 
+    let timingObserver = null;
+    // Unlike "warmedParts", this records what subsequent game XHRs actually
+    // did. Cross-origin zero/zero timing is UNKNOWN, never a cache-hit claim.
+    const timingURLs = new Map(dataPartUrls.map((url, index) =>
+      [new URL(url, document.baseURI).href, index + 1]));
+    const observeHTTP = list => {
+      for (const entry of list.getEntries()) {
+        if (entry.initiatorType !== 'xmlhttprequest') continue;
+        let part = timingURLs.get(entry.name);
+        if (!part) {
+          for (let index = 0; index < partCount; index += 1) {
+            if (new URL(module.__hkDataPartUrl(index), document.baseURI).href === entry.name) {
+              part = index + 1; break;
+            }
+          }
+        }
+        if (!part) continue;
+        const warmed = state.warmedParts.get(part);
+        const prepared = Boolean(warmed &&
+          new URL(warmed.url, document.baseURI).href === entry.name && warmed.time <= entry.startTime);
+        const kind = entry.workerStart > 0 || !Number.isFinite(entry.transferSize) || !(entry.decodedBodySize > 0) ? 'unknown' :
+          entry.transferSize === 0 ? 'cached' : 'network';
+        const evidence = state.cacheEvidence;
+        evidence.observed += 1; evidence[kind] += 1;
+        if (prepared) evidence[kind === 'cached' ? 'warmedCached' :
+          kind === 'network' ? 'warmedNetwork' : 'warmedUnknown'] += 1;
+        evidence.transferBytes += entry.transferSize || 0;
+        if (state.recentHTTPReads.length === 32) state.recentHTTPReads.shift();
+        state.recentHTTPReads.push({ part, prepared, kind,
+          transferBytes: entry.transferSize || 0, decodedBytes: entry.decodedBodySize || 0,
+          durationMs: entry.duration, time: entry.startTime });
+      }
+    };
+
+    function report() {
+      if (timingObserver) observeHTTP({ getEntries: () => timingObserver.takeRecords() });
+      const resident = [], warmed = [], missing = [];
+      for (const part of state.desiredParts) {
+        if (module.__hkDataPartResident(part - 1)) resident.push(part);
+        else if (state.warmedParts.has(part) &&
+          state.warmedParts.get(part).url === module.__hkDataPartUrl(part - 1) &&
+          performance.now() - state.warmedParts.get(part).time < WARM_TTL_MS) warmed.push(part);
+        else missing.push(part);
+      }
+      return {
+        build: BUILD_VERSION, scene: state.currentScene, source: state.currentSource,
+        status: state.status, ignoredSceneHints: state.ignoredSceneHints,
+        desiredParts: [...state.desiredParts], residentParts: resident,
+        completedHTTPWarmParts: warmed, notPreparedParts: missing,
+        demandMisses: state.demandMisses, preparedMisses: state.preparedMisses,
+        sourceMissPartsSinceSceneSignal: [...state.demandedParts],
+        synchronousReadMs: state.demandWaitMs, timingStatus: state.timingStatus,
+        sourceCache: { bytes: stats.cacheBytes, limit: stats.cacheLimit,
+          hits: stats.cacheHits, misses: stats.cacheMisses },
+        cacheEvidence: Object.assign({}, state.cacheEvidence),
+        recentHTTPReads: state.recentHTTPReads.slice(), sceneChanges: state.sceneChanges.slice(),
+        coverage: 'Mapped neighbors plus bounded observed extras; not complete dependency closure.'
+      };
+    }
+
     const visibility = () => document.hidden ? suspend() : resume();
     const online = () => { state.failedParts.clear(); warmNeighbors(); };
     const controller = {
-      version: '1.2.1', build: BUILD_VERSION, state, suspend, resume,
+      version: '1.4.0', build: BUILD_VERSION, state, suspend, resume, report,
       cleanup() {
         state.disposed = true; suspend(); state.status = 'stopped';
+        if (timingObserver) { timingObserver.disconnect(); timingObserver = null; }
+        timingURLs.clear();
+        if (module.__hkAssetReadActivity === assetReadActivity) delete module.__hkAssetReadActivity;
         document.removeEventListener('visibilitychange', visibility);
         window.removeEventListener('pagehide', suspend);
         window.removeEventListener('pageshow', resume);
@@ -561,8 +682,20 @@
       }
     };
     try {
+      module.__hkAssetReadActivity = assetReadActivity;
       installLastFileHook();
       installDataReadHook();
+      if (typeof PerformanceObserver === 'function') {
+        try {
+          timingObserver = new PerformanceObserver(observeHTTP);
+          timingObserver.observe({ entryTypes: ['resource'] });
+          state.timingStatus = 'observing';
+        } catch (error) {
+          if (timingObserver) timingObserver.disconnect();
+          timingObserver = null;
+          state.timingStatus = 'unavailable: ' + String(error);
+        }
+      }
       document.addEventListener('visibilitychange', visibility);
       window.addEventListener('pagehide', suspend);
       window.addEventListener('pageshow', resume);
@@ -573,7 +706,7 @@
     }
     window.__hkNeighborPreload = controller;
     state.status = state.suspended ? 'suspended' : state.running ? 'warming' :
-      state.currentScene ? 'ready' : 'waiting-for-scene';
+      state.queue.length ? 'waiting-for-assets' : state.currentScene ? 'ready' : 'waiting-for-scene';
     return controller;
   };
 })();
