@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.09.25-r4';
+  const FS_VERSION = '2026.09.26-r6';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -321,6 +321,8 @@
     // remembered recovery URLs. Expose strings, never cache data/buffers.
     module.__hkDataPartUrl = partIndex => preferredUrls[partIndex];
     const cache = new Map();
+    // Boolean only: never expose buffers or evict demand data for preloading.
+    module.__hkDataPartResident = partIndex => cache.has(partIndex);
     const demandedParts = new Set();
     const touchedFiles = new Set();
     let residentBytes = 0;
@@ -509,19 +511,20 @@
       const expected = partLengths[partIndex];
       evictFor(expected);
 
-      let bytes;
+      const activity = module.__hkAssetReadActivity;
       try {
+        if (activity) activity(true, partIndex);
         const result = syncWhole(
           preferredUrls[partIndex], expected, stats, fallbackUrls[partIndex]
         );
         preferredUrls[partIndex] = result.url;
-        bytes = result.bytes;
+        return storePart(partIndex, result.bytes);
       } catch (error) {
         stats.lastError = errorText(error);
         throw error;
+      } finally {
+        if (activity) activity(false, partIndex);
       }
-
-      return storePart(partIndex, bytes);
     }
 
     function reportReadFailure(error, entry, operation, position, length) {
@@ -638,6 +641,7 @@
       const node = FS.lookupPath(entry.name).node;
       node.usedBytes = entry.size;
       node.contents = null;
+      node.__hkReadOnlyAsset = true;
 
       const baseOps = node.stream_ops;
       const operations = Object.assign({}, baseOps, {
@@ -672,12 +676,15 @@
           }
         },
 
-        mmap(stream, buffer, address, length, position) {
+        mmap(stream, buffer, address, length, position, prot, flags) {
           stats.activeFile = entry.name;
           stats.phase = 'mmap';
           stats.mmapCalls += 1;
           let pointer = 0;
           try {
+            // Asset files are immutable. Private writable mappings are safe;
+            // a shared writable mapping cannot be synchronized back to them.
+            if ((prot & 2) && !(flags & 2)) throw new FS.ErrnoError(13);
             if (!Number.isSafeInteger(length) || length <= 0 ||
                 !Number.isSafeInteger(position) || position < 0) {
               throw new FS.ErrnoError(22);
@@ -708,6 +715,10 @@
           }
         },
 
+        // Never inherit MEMFS write-back: lazy asset contents intentionally
+        // stay null. Shared read-only and private maps have nothing to flush.
+        msync() { return 0; },
+
         write() {
           stats.lastError =
             'StabilityFS: unexpected write to read-only asset ' + entry.name;
@@ -715,6 +726,7 @@
         }
       });
 
+      operations.allocate = operations.write;
       node.stream_ops = operations;
 
       if (onProgress && (index % 20 === 0 || index + 1 === entries.length)) {
@@ -986,7 +998,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.09.25-r4';
+  const VERSION = '2026.09.26-r6';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
@@ -997,7 +1009,8 @@
     const tick = '"suspended"===WEBAudio.audioContext.state?WEBAudio.audioContext.resume():Module.clearInterval(e)';
     const resume = 'function _JS_Sound_ResumeIfNeeded(){0!=WEBAudio.audioWebEnabled&&"suspended"===WEBAudio.audioContext.state&&WEBAudio.audioContext.resume()}';
     const ended = 'this.source.onended=function(){e&&dynCall("vi",e,[i]),o.setup()}';
-    for (const marker of [entry, tick, resume, ended]) {
+    const msync = 'doMsync:function(e,i,n,t){var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}';
+    for (const marker of [entry, tick, resume, ended, msync]) {
       if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
         throw new Error('Unexpected Unity framework layout; suspend/resume hooks were not applied.');
       }
@@ -1025,7 +1038,11 @@
         'if(Module.__hkLifecycle.state.paused || !Browser.allowAsyncCallbacks)Browser.queuedAsyncCallbacks.push(fn);else fn();' +
       '}' +
       '};\n';
-    return source.replace(entry, entry + bridge)
+    // The legacy unmap syscall stages a full JS copy even for private maps.
+    // Skip staging for immutable LazyFS assets only; preserve other files.
+    return source.replace(msync,
+      'doMsync:function(e,i,n,t){if(i&&i.node.__hkReadOnlyAsset)return;var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}')
+      .replace(entry, entry + bridge)
       .replace(tick, 'Module.__hkLifecycle.audioTick(e)')
       .replace(resume, 'function _JS_Sound_ResumeIfNeeded(){Module.__hkLifecycle.requestAudioResume()}')
       .replace(ended, 'this.source.onended=function(){Module.__hkRuntime.audioEnded(function(){e&&dynCall("vi",e,[i]),o.setup()})}');
@@ -1081,6 +1098,18 @@
         fsError: stats ? stats.lastError : '',
         fsSyncLoads: stats ? stats.syncPartLoads : 0,
         fsSyncBlockedMs: stats ? stats.syncBlockedMs : 0,
+        fsMmapCalls: stats ? stats.mmapCalls : 0,
+        fsCacheBytes: stats ? stats.cacheBytes : 0,
+        fsLastFailure: stats ? stats.lastFailure : null,
+        preload: global.__hkNeighborPreload ? {
+          scene: global.__hkNeighborPreload.state.currentScene,
+          source: global.__hkNeighborPreload.state.currentSource,
+          status: global.__hkNeighborPreload.state.status,
+          activeParts: Array.from(global.__hkNeighborPreload.state.activeWarmParts),
+          demandPauses: global.__hkNeighborPreload.state.demandPauses,
+          lastFailure: global.__hkNeighborPreload.state.lastFailure,
+          effectiveness: global.__hkNeighborPreload.report()
+        } : null,
         events: state.events.slice()
       };
     }
