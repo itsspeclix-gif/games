@@ -1,12 +1,16 @@
 (function () {
   'use strict';
 
-  const BUILD_VERSION = '2026.09.26-r6';
+  const BUILD_VERSION = '2026.09.27-r7';
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
   const DEFAULT_READ_WINDOW_MS = 1800;
   // Scheduling policy, NOT a Unity scene-loaded event. Wait after scene
   // identification or a source-cache MISS. Cached reads must not starve warming.
   const ASSET_QUIET_MS = 1500;
+  // Observed frame gap/heap growth, not a guessed total-RAM limit. Only optional
+  // downloads back off; required reads and Unity frames are never gated here.
+  const FRAME_GAP_MS = 250;
+  const RECOVERY_QUIET_MS = 2000;
   const WARM_TTL_MS = 120000;
   const RETRY_COOLDOWN_MS = 15000;
   const REQUEST_TIMEOUT_MS = 30000;
@@ -181,6 +185,10 @@
       currentScene: '', currentSource: '',
       lastDemandTime: performance.now(), demandDepth: 0, demandPauses: 0,
       ignoredSceneHints: 0, sceneChanges: [],
+      runtimeHoldUntil: 0, lastFrameTime: null,
+      heapCapacityBytes: module.HEAPU8 ? module.HEAPU8.byteLength : 0,
+      heapGrowthEvents: 0, longFrameGaps: 0, recoveryPauses: 0,
+      lastRecoveryReason: '', lastSampleTime: -Infinity, runtimeSamples: [],
       demandedParts: new Set(), demandMisses: 0, preparedMisses: 0,
       demandStart: 0, demandWaitMs: 0,
       cacheEvidence: { observed: 0, cached: 0, network: 0, unknown: 0,
@@ -316,7 +324,7 @@
           ? warmed.time + WARM_TTL_MS : performance.now()));
       }
       if (!Number.isFinite(next)) return;
-      next = Math.max(next, state.lastDemandTime + ASSET_QUIET_MS);
+      next = Math.max(next, state.lastDemandTime + ASSET_QUIET_MS, state.runtimeHoldUntil);
       state.refreshTimer = setTimeout(() => {
         state.refreshTimer = null;
         warmNeighbors();
@@ -328,7 +336,8 @@
       state.running = true;
       try {
         while (!state.disposed && !state.suspended && state.queue.length &&
-               !state.demandDepth && performance.now() - state.lastDemandTime >= ASSET_QUIET_MS) {
+               !state.demandDepth && performance.now() - state.lastDemandTime >= ASSET_QUIET_MS &&
+               performance.now() >= state.runtimeHoldUntil) {
           const part = state.queue.shift();
           if (module.__hkDataPartResident(part - 1)) continue;
           const url = module.__hkDataPartUrl(part - 1);
@@ -360,6 +369,7 @@
         state.running = false;
         state.status = state.disposed ? 'stopped' : state.suspended ? 'suspended' :
           !state.currentScene ? 'waiting-for-scene' :
+          performance.now() < state.runtimeHoldUntil ? 'waiting-for-recovery' :
           state.demandDepth || performance.now() - state.lastDemandTime < ASSET_QUIET_MS ? 'waiting-for-assets' :
           [...state.desiredParts].some(part => state.failedParts.has(part)) ? 'retrying' : 'ready';
         scheduleWarmPass();
@@ -385,10 +395,10 @@
       // A single runner owns ALL requests, even while an aborted body settles.
       // Replacing the queue cannot spawn a second worker.
       if (state.queue.length && !state.demandDepth &&
-          now - state.lastDemandTime >= ASSET_QUIET_MS) {
+          now - state.lastDemandTime >= ASSET_QUIET_MS && now >= state.runtimeHoldUntil) {
         runWarmQueue().catch(error => reportError(error, { phase: 'queue' }));
       } else {
-        if (state.queue.length) state.status = 'waiting-for-assets';
+        if (state.queue.length) state.status = now < state.runtimeHoldUntil ? 'waiting-for-recovery' : 'waiting-for-assets';
         else if (!state.running) state.status = state.currentScene ?
           ([...state.desiredParts].some(part => state.failedParts.get(part) > now) ? 'retrying' : 'ready') : 'waiting-for-scene';
         scheduleWarmPass();
@@ -416,6 +426,45 @@
         }
       } else if (!state.demandDepth && state.refreshTimer === null && !state.running) {
         scheduleWarmPass();
+      }
+    }
+
+    const previousPostMainLoop = module.postMainLoop;
+    function afterFrame() {
+      if (previousPostMainLoop) previousPostMainLoop.apply(this, arguments);
+      if (state.disposed || state.suspended || document.hidden ||
+          (module.__hkLifecycle && module.__hkLifecycle.state.paused)) {
+        state.lastFrameTime = null;
+        return;
+      }
+      const now = performance.now();
+      const bytes = module.HEAPU8 ? module.HEAPU8.byteLength : 0;
+      const gap = state.lastFrameTime === null ? 0 : now - state.lastFrameTime;
+      const grew = bytes > state.heapCapacityBytes;
+      state.heapCapacityBytes = bytes;
+      state.lastFrameTime = now;
+      if (grew) state.heapGrowthEvents += 1;
+      if (gap >= FRAME_GAP_MS) state.longFrameGaps += 1;
+      if (grew || gap >= FRAME_GAP_MS) {
+        state.lastRecoveryReason = grew ? 'wasm-heap-growth' : 'long-frame-gap';
+        state.runtimeHoldUntil = now + RECOVERY_QUIET_MS;
+        if (state.warmController && !state.warmController.signal.aborted) {
+          state.recoveryPauses += 1;
+          state.warmController.abort();
+        }
+        if (state.desiredParts.size) state.status = 'waiting-for-recovery';
+        scheduleWarmPass();
+      }
+      // Scalar-only, 24 samples / at most one per five seconds. Never retain
+      // heap views, texture objects, payloads or an unbounded console log.
+      if (now - state.lastSampleTime >= 5000) {
+        state.lastSampleTime = now;
+        if (state.runtimeSamples.length === 24) state.runtimeSamples.shift();
+        state.runtimeSamples.push({ time: now, scene: state.currentScene,
+          wasmCapacityBytes: bytes, sourceCacheBytes: stats.cacheBytes,
+          newSourceBufferBytes: stats.newPartBufferBytes,
+          reusedSourceBuffers: stats.reusedPartBuffers,
+          syncReadMs: stats.syncBlockedMs });
       }
     }
 
@@ -584,6 +633,7 @@
     }
 
     function suspend() {
+      state.lastFrameTime = null;
       state.suspended = true; state.status = 'suspended'; state.queue.length = 0;
       if (state.refreshTimer !== null) clearTimeout(state.refreshTimer);
       if (state.candidateTimer !== null) clearTimeout(state.candidateTimer);
@@ -595,6 +645,7 @@
       if (state.disposed || document.hidden || !state.suspended ||
           (module.__hkLifecycle && module.__hkLifecycle.state.paused)) return;
       state.suspended = false;
+      state.lastFrameTime = null;
       state.lastDemandTime = performance.now();
       state.recentDataReads.length = 0;
       state.candidateScene = ''; state.candidateHits = 0;
@@ -655,7 +706,17 @@
         sourceMissPartsSinceSceneSignal: [...state.demandedParts],
         synchronousReadMs: state.demandWaitMs, timingStatus: state.timingStatus,
         sourceCache: { bytes: stats.cacheBytes, limit: stats.cacheLimit,
-          hits: stats.cacheHits, misses: stats.cacheMisses },
+          hits: stats.cacheHits, misses: stats.cacheMisses,
+          newBuffers: stats.newPartBuffers, newBufferBytes: stats.newPartBufferBytes,
+          reusedBuffers: stats.reusedPartBuffers },
+        runtimeRecovery: {
+          wasmCapacityBytes: state.heapCapacityBytes,
+          capacityMeaning: 'Allocated WASM capacity, not live allocations or device RAM',
+          heapGrowthEvents: state.heapGrowthEvents, longFrameGaps: state.longFrameGaps,
+          preloadCancellations: state.recoveryPauses,
+          holdRemainingMs: Math.max(0, state.runtimeHoldUntil - performance.now()),
+          lastReason: state.lastRecoveryReason, samples: state.runtimeSamples.slice()
+        },
         cacheEvidence: Object.assign({}, state.cacheEvidence),
         recentHTTPReads: state.recentHTTPReads.slice(), sceneChanges: state.sceneChanges.slice(),
         coverage: 'Mapped neighbors plus bounded observed extras; not complete dependency closure.'
@@ -665,9 +726,13 @@
     const visibility = () => document.hidden ? suspend() : resume();
     const online = () => { state.failedParts.clear(); warmNeighbors(); };
     const controller = {
-      version: '1.4.0', build: BUILD_VERSION, state, suspend, resume, report,
+      version: '1.5.0', build: BUILD_VERSION, state, suspend, resume, report,
       cleanup() {
         state.disposed = true; suspend(); state.status = 'stopped';
+        if (module.postMainLoop === afterFrame) {
+          if (previousPostMainLoop === undefined) delete module.postMainLoop;
+          else module.postMainLoop = previousPostMainLoop;
+        }
         if (timingObserver) { timingObserver.disconnect(); timingObserver = null; }
         timingURLs.clear();
         if (module.__hkAssetReadActivity === assetReadActivity) delete module.__hkAssetReadActivity;
@@ -683,6 +748,7 @@
     };
     try {
       module.__hkAssetReadActivity = assetReadActivity;
+      module.postMainLoop = afterFrame;
       installLastFileHook();
       installDataReadHook();
       if (typeof PerformanceObserver === 'function') {
