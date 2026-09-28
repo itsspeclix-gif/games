@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.09.26-r6';
+  const FS_VERSION = '2026.09.27-r7';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -194,7 +194,7 @@
     throw lastError;
   }
 
-  function syncWhole(url, expected, stats, fallbackUrl) {
+  function syncWhole(url, expected, stats, fallbackUrl, reuse) {
     const started = performance.now();
     const partName = url.split('?')[0].split('/').pop() || url;
     let lastError;
@@ -243,7 +243,12 @@
         // must not trigger three repeated downloads/allocation attempts.
         let bytes;
         try {
-          bytes = new Uint8Array(expected);
+          bytes = reuse || new Uint8Array(expected);
+          if (reuse) stats.reusedPartBuffers += 1;
+          else {
+            stats.newPartBuffers += 1;
+            stats.newPartBufferBytes += expected;
+          }
         } catch (error) {
           const failure = new Error('StabilityFS: chunk allocation failed: ' + errorText(error));
           failure.hkAllocationFailure = true;
@@ -346,6 +351,8 @@
       refetches: 0,
       evictions: 0,
       syncPartLoads: 0,
+      // Cumulative decoder allocations/reuse; NOT total device or live memory.
+      newPartBuffers: 0, newPartBufferBytes: 0, reusedPartBuffers: 0,
       syncRetries: 0,
       syncAttemptFailures: 0,
       syncRecovered: 0,
@@ -388,6 +395,7 @@
         throw new Error('StabilityFS: one physical part exceeds cache limit');
       }
 
+      let reuse = null;
       // Evict before the XHR/allocation. This keeps the resident source cache
       // below its 60 MiB ceiling even during a new-part fetch.
       while (residentBytes + bytesNeeded > CACHE_LIMIT && cache.size > 0) {
@@ -395,10 +403,15 @@
         const record = cache.get(victim);
         cache.delete(victim);
         residentBytes -= record.bytes.byteLength;
+        // Only detached-from-cache storage is reusable. Nothing outside this
+        // filesystem owns a source buffer; reads copy bytes before the next miss.
+        // Keep no spare-buffer pool and never overwrite a still-cached part.
+        if (record.bytes.byteLength === bytesNeeded) reuse = record.bytes;
         stats.evictions += 1;
       }
 
       refreshCacheStats();
+      return reuse;
     }
 
     function storePart(partIndex, bytes) {
@@ -509,13 +522,13 @@
       }
 
       const expected = partLengths[partIndex];
-      evictFor(expected);
+      const reuse = evictFor(expected);
 
       const activity = module.__hkAssetReadActivity;
       try {
         if (activity) activity(true, partIndex);
         const result = syncWhole(
-          preferredUrls[partIndex], expected, stats, fallbackUrls[partIndex]
+          preferredUrls[partIndex], expected, stats, fallbackUrls[partIndex], reuse
         );
         preferredUrls[partIndex] = result.url;
         return storePart(partIndex, result.bytes);
@@ -998,7 +1011,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.09.26-r6';
+  const VERSION = '2026.09.27-r7';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
