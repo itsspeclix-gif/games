@@ -67,13 +67,13 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.09.27-r7</div>
+    <div id="build-version">Version: HK-WebGL 2026.10.03-r10</div>
     <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.09.27-r7';
-    const BUILD_TOKEN = '2026.09.27-r7';
+    const BUILD_VERSION = 'HK-WebGL 2026.10.03-r10';
+    const BUILD_TOKEN = '2026.10.03-r10';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
     const DATA_FALLBACK_BASE =
@@ -363,21 +363,17 @@
     }
 
     function reportDataReadError(detail) {
-      // No changes to the normal game UI. Restore the existing loading panel
-      // only for a genuine, unrecovered read failure; never clear saved data.
-      if (!loading.isConnected) document.body.appendChild(loading);
-      loading.style.background = '#101018';
-      loading.style.zIndex = '2147483647';
-      loading.style.padding = '24px';
-      progress.hidden = true;
-      message.style.maxWidth = 'min(640px, 90vw)';
-      message.style.overflowWrap = 'anywhere';
-      message.textContent = detail.kind === 'data-io'
-        ? 'Game data could not be loaded after automatic retries. Close this game and reopen it from Game Library.'
-        : 'Game data read failed. Close this game and reopen it from Game Library.';
-      retryStatus.style.maxWidth = 'min(640px, 90vw)';
-      retryStatus.style.overflowWrap = 'anywhere';
-      retryStatus.textContent = detail.file + ': ' + detail.message;
+      // The legacy native read has failed. Stop subsequent frames and expose
+      // the first failure's complete route history; do not offer unsafe Resume.
+      const failure = window.__hkLastReadFailure || detail;
+      if (dataProgressTimer) { clearInterval(dataProgressTimer); dataProgressTimer = null; }
+      loading.remove();
+      const attempts = failure.transport && failure.transport.attempts;
+      const summary = attempts ? attempts.map(item => item.route + ': ' +
+        (item.status ? 'HTTP ' + item.status : 'request failed') +
+        (item.actual !== null && item.actual !== item.expected
+          ? ' (' + item.actual + '/' + item.expected + ' bytes)' : '')).join('; ') : failure.message;
+      lifecycle.runtimeError(failure.file + ': ' + summary);
     }
 
     function updateMountProgress(update) {
