@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.10.03-r10';
+  const FS_VERSION = '2026.10.03-r11';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -1088,7 +1088,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.10.03-r10';
+  const VERSION = '2026.10.03-r11';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
