@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.09.27-r7';
+  const FS_VERSION = '2026.10.03-r10';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -17,7 +17,9 @@
 
   function setMessage(text) {
     const element = document.getElementById('message');
-    if (element) element.textContent = text;
+    // Keep the FIRST unrecovered failure visible; later native reads must not
+    // replace it with a misleading 'Streaming...' message.
+    if (element && !global.__hkLastReadFailure) element.textContent = text;
   }
 
   function readString(bytes, offset, length) {
@@ -106,16 +108,36 @@
     }
   }
 
-  function requestUrl(url, attempt, fallbackUrl) {
-    if (attempt === 0) return url; // Preserve the normal preloader/cache key.
-    const result = new URL(
-      attempt === 2 && fallbackUrl ? fallbackUrl : url,
-      document.baseURI
-    );
-    // Query-only retry: no custom headers (and no CORS preflight).
-    result.searchParams.set(
-      'hk_read_retry', Date.now().toString(36) + '-' + (++retrySerial)
-    );
+  function requestPlan(primary, preferred, fallback) {
+    // Retain both configured sources even after a recovered URL becomes the
+    // preferred cache key. Otherwise backup -> backup -> backup can strand a
+    // read while the primary is healthy. Never invent another data origin.
+    const canonical = value => {
+      const url = new URL(value, document.baseURI);
+      url.searchParams.delete('hk_read_retry');
+      return url.href;
+    };
+    const primaryKey = canonical(primary);
+    const hasBackup = Boolean(fallback && canonical(fallback) !== primaryKey);
+    const preferredBackup = hasBackup && canonical(preferred) === canonical(fallback);
+    const routes = [{ url: preferred, backup: preferredBackup, fresh: false }];
+    if (hasBackup) {
+      routes.push({ url: preferredBackup ? primary : fallback, backup: !preferredBackup, fresh: false });
+      routes.push({ url: preferred, backup: preferredBackup, fresh: true });
+      routes.push({ url: preferredBackup ? primary : fallback, backup: !preferredBackup, fresh: true });
+    } else {
+      routes.push({ url: primary, backup: false, fresh: true });
+      routes.push({ url: primary, backup: false, fresh: true });
+    }
+    return routes;
+  }
+
+  function requestUrl(route) {
+    if (!route.fresh) return route.url;
+    const result = new URL(route.url, document.baseURI);
+    // Query-only retry: no custom headers or CORS preflight. Allocate this
+    // cache-buster only when the attempt is actually needed.
+    result.searchParams.set('hk_read_retry', Date.now().toString(36) + '-' + (++retrySerial));
     return result.href;
   }
 
@@ -151,66 +173,105 @@
     return failure;
   }
 
-  async function fetchBytes(url, expected, stats, fallbackUrl, validate) {
+  async function fetchBytes(primary, expected, stats, fallbackUrl, validate, preferred = primary, signal = null, drainOnly = false) {
+    const routes = requestPlan(primary, preferred, fallbackUrl);
+    const transport = { mode: drainOnly ? 'preload' : 'bootstrap', attempts: [], streamFallbacks: 0 };
     let lastError;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const targetUrl = requestUrl(url, attempt, fallbackUrl);
-      const detail = {
-        url: targetUrl, attempt: attempt + 1,
-        status: 0, expected, actual: null
-      };
-      if (attempt > 0) {
-        stats.bootstrapRetries += 1;
-        setMessage('Retrying archive index (' + (attempt + 1) + '/3)…');
-        await new Promise(resolve => global.setTimeout(resolve, attempt * 600));
-      }
-      let response;
+    for (let attempt = 0; attempt < routes.length; attempt += 1) {
+      const route = routes[attempt];
+      const targetUrl = requestUrl(route);
+      const detail = { url: targetUrl, attempt: attempt + 1, route: route.backup ? 'backup' : 'primary',
+        status: 0, expected, actual: null, elapsedMs: 0, outcome: 'pending' };
+      const started = performance.now();
+      const request = new AbortController();
+      const abort = () => request.abort();
+      let timedOut = false;
+      if (signal) signal.addEventListener('abort', abort, { once: true });
+      // Only asynchronous requests can have an event-loop-driven timeout.
+      const timeout = global.setTimeout(() => { timedOut = true; request.abort(); }, 30000);
+      let response, reader;
       try {
+        if (signal && signal.aborted) { const cancelled = new Error('Asset preload cancelled'); cancelled.name = 'AbortError'; throw cancelled; }
+        transport.attempts.push(detail);
+        if (!drainOnly && attempt > 0) {
+          stats.bootstrapRetries += 1;
+          setMessage('Retrying archive index (' + (attempt + 1) + '/' + routes.length + ')…');
+        }
         response = await dataFetch(targetUrl, {
-          cache: attempt === 0 ? 'force-cache' : 'reload'
+          cache: route.fresh ? 'reload' : 'force-cache', credentials: 'same-origin', signal: request.signal
         });
         detail.status = response.status;
-        if (response.status !== 200) {
-          checkResponse(response.status, null, expected, targetUrl, attempt);
+        if (response.status !== 200) checkResponse(response.status, null, expected, targetUrl, attempt);
+        let bytes;
+        if (drainOnly && response.body && typeof response.body.getReader === 'function') {
+          reader = response.body.getReader();
+          detail.actual = 0;
+          while (true) {
+            const item = await reader.read();
+            if (item.done) break;
+            detail.actual += item.value.byteLength;
+            if (detail.actual > expected) checkResponse(response.status, detail.actual, expected, targetUrl, attempt);
+          }
+        } else {
+          if (drainOnly) transport.streamFallbacks += 1;
+          bytes = new Uint8Array(await response.arrayBuffer());
+          detail.actual = bytes.byteLength;
         }
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        detail.actual = bytes.byteLength;
-        checkResponse(response.status, bytes.byteLength, expected, targetUrl, attempt);
+        checkResponse(response.status, detail.actual, expected, targetUrl, attempt);
+        if (request.signal.aborted) throw new Error(timedOut ? 'Asset request timed out' : 'Asset request cancelled');
         if (validate) validate(bytes);
-        if (attempt > 0) stats.bootstrapRecovered += 1;
-        if (attempt === 2 && fallbackUrl) stats.fallbackLoads += 1;
-        return { bytes, url: targetUrl };
+        detail.outcome = 'success';
+        if (!drainOnly && attempt > 0) stats.bootstrapRecovered += 1;
+        if (route.backup) stats.fallbackLoads += 1;
+        // A streamed warmup never publishes or retains payload buffers.
+        return { bytes: drainOnly ? undefined : bytes, url: targetUrl, transport };
       } catch (error) {
-        lastError = dataFailure(
-          'StabilityFS bootstrap failed: ' + errorText(error),
-          rememberAttempt(stats, error, detail)
-        );
+        detail.outcome = signal && signal.aborted ? 'cancelled' : timedOut ? 'timeout' : 'failed';
+        detail.message = timedOut && !(signal && signal.aborted) ? 'Asset request timed out' : errorText(error);
+        lastError = dataFailure('StabilityFS ' + (drainOnly ? 'preload' : 'bootstrap') + ' failed: ' + detail.message,
+          Object.assign({}, detail, { transport }));
+        // Signal cancellation is deliberate, not evidence of a broken host.
+        if (!(signal && signal.aborted)) rememberAttempt(stats, error, detail);
+        request.abort();
         try {
-          if (response && response.body) await response.body.cancel();
-        } catch (_) {}
+          if (reader) await reader.cancel();
+          else if (response && response.body) await response.body.cancel();
+        } catch (_) { /* Keep the original network/body error. */ }
+        if (signal && signal.aborted) throw lastError;
+      } finally {
+        detail.elapsedMs = Math.round(performance.now() - started);
+        if (reader) reader.releaseLock();
+        global.clearTimeout(timeout);
+        if (signal) signal.removeEventListener('abort', abort);
       }
     }
-    stats.lastError = lastError.message;
+    if (!drainOnly) stats.lastError = lastError.message;
     throw lastError;
   }
 
-  function syncWhole(url, expected, stats, fallbackUrl, reuse) {
+  function syncWhole(primary, expected, stats, fallbackUrl, reuse, preferred = primary) {
+    const routes = requestPlan(primary, preferred, fallbackUrl);
+    const transport = { mode: 'sync-read', attempts: [] };
     const started = performance.now();
-    const partName = url.split('?')[0].split('/').pop() || url;
+    const partName = primary.split('?')[0].split('/').pop() || primary;
     let lastError;
     stats.activePart = partName;
     try {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const targetUrl = requestUrl(url, attempt, fallbackUrl);
+      for (let attempt = 0; attempt < routes.length; attempt += 1) {
+        const route = routes[attempt];
+        const targetUrl = requestUrl(route);
+        const attemptStarted = performance.now();
         const detail = {
           url: targetUrl, attempt: attempt + 1,
-          status: 0, expected, actual: null
+          status: 0, expected, actual: null, route: route.backup ? 'backup' : 'primary',
+          outcome: 'pending', elapsedMs: 0
         };
+        transport.attempts.push(detail);
         stats.phase = attempt ? 'sync-retry' : 'sync-read';
         if (attempt) stats.syncRetries += 1;
         setMessage(attempt
           ? 'Connection interrupted — retrying ' + partName +
-            ' (' + (attempt + 1) + '/3)…'
+            ' (' + (attempt + 1) + '/' + routes.length + ')…'
           : 'Streaming ' + partName + '…');
         let xhr = null;
         let text = '';
@@ -230,12 +291,14 @@
           checkResponse(xhr.status, text.length, expected, targetUrl, attempt);
         } catch (error) {
           stats.syncAttemptFailures += 1;
+          detail.outcome = 'failed'; detail.message = errorText(error);
           lastError = dataFailure(
             'StabilityFS data request failed: ' + errorText(error),
-            rememberAttempt(stats, error, detail)
+            Object.assign({}, rememberAttempt(stats, error, detail), { transport })
           );
           continue;
         } finally {
+          detail.elapsedMs = Math.round(performance.now() - attemptStarted);
           xhr = null;
         }
 
@@ -261,7 +324,9 @@
         stats.syncPartLoads += 1;
         stats.syncBytes += bytes.byteLength;
         if (attempt) stats.syncRecovered += 1;
-        if (attempt === 2 && fallbackUrl) stats.fallbackLoads += 1;
+        if (route.backup) stats.fallbackLoads += 1;
+        detail.outcome = 'success';
+        stats.lastSuccessfulTransport = transport;
         return { bytes, url: targetUrl };
       }
       throw lastError;
@@ -362,6 +427,7 @@
       fallbackLoads: 0,
       ioFailures: 0,
       lastTransportFailure: null,
+      lastSuccessfulTransport: null,
       lastFailure: null,
       syncBytes: 0,
       syncBlockedMs: 0,
@@ -375,6 +441,17 @@
       activePart: '',
       lastFile: '',
       lastError: ''
+    };
+
+    module.__hkWarmDataPart = async (partIndex, signal) => {
+      const result = await fetchBytes(urls[partIndex], partLengths[partIndex], stats,
+        fallbackUrls[partIndex], null, preferredUrls[partIndex], signal, true);
+      // Cancellation can occur between fetchBytes resolving and this continuation.
+      if (signal && signal.aborted) throw dataFailure('Asset preload cancelled', { transport: result.transport });
+      // fetchBytes rejects aborted/incomplete responses. Publish the SAME key
+      // that the next required read should use, without touching the RAM LRU.
+      preferredUrls[partIndex] = result.url;
+      return { url: result.url, transport: result.transport };
     };
 
     function refreshCacheStats() {
@@ -442,7 +519,7 @@
 
       evictFor(partLengths[partIndex]);
       const result = await fetchBytes(
-        preferredUrls[partIndex], partLengths[partIndex], stats,
+        urls[partIndex], partLengths[partIndex], stats,
         fallbackUrls[partIndex], partIndex === 0 ? bytes => {
           validateMagic(bytes);
           const headerEnd = new DataView(
@@ -452,7 +529,7 @@
             throw new Error('StabilityFS: invalid header extent');
           }
           if (headerEnd <= bytes.byteLength) parseArchive(bytes, totalSize);
-        } : null
+        } : null, preferredUrls[partIndex]
       );
       preferredUrls[partIndex] = result.url;
       return storePart(partIndex, result.bytes);
@@ -528,7 +605,7 @@
       try {
         if (activity) activity(true, partIndex);
         const result = syncWhole(
-          preferredUrls[partIndex], expected, stats, fallbackUrls[partIndex], reuse
+          urls[partIndex], expected, stats, fallbackUrls[partIndex], reuse, preferredUrls[partIndex]
         );
         preferredUrls[partIndex] = result.url;
         return storePart(partIndex, result.bytes);
@@ -551,7 +628,7 @@
       });
       stats.lastError = detail.message;
       stats.lastFailure = detail;
-      global.__hkLastReadFailure = detail;
+      if (!global.__hkLastReadFailure) global.__hkLastReadFailure = detail;
       if (error && error.hkDataIO) stats.ioFailures += 1;
       // Diagnostic hooks must never introduce another filesystem exception.
       if (!previous || previous.message !== detail.message ||
@@ -1011,7 +1088,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.09.27-r7';
+  const VERSION = '2026.10.03-r10';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
@@ -1021,9 +1098,14 @@
     const entry = 'function unityFramework(Module) {';
     const tick = '"suspended"===WEBAudio.audioContext.state?WEBAudio.audioContext.resume():Module.clearInterval(e)';
     const resume = 'function _JS_Sound_ResumeIfNeeded(){0!=WEBAudio.audioWebEnabled&&"suspended"===WEBAudio.audioContext.state&&WEBAudio.audioContext.resume()}';
-    const ended = 'this.source.onended=function(){e&&dynCall("vi",e,[i]),o.setup()}';
+    const ended = 'var o=this;this.source.onended=function(){e&&dynCall("vi",e,[i]),o.setup()}';
+    const setup = 'setup:function(){this.source=WEBAudio.audioContext.createBufferSource(),this.setupPanning()}';
+    const release = 'function _JS_Sound_ReleaseInstance(e){WEBAudio.audioInstances[e]=null}';
+    const stop = 'function _JS_Sound_Stop(e,i){if(0!=WEBAudio.audioWebEnabled){var n=WEBAudio.audioInstances[e];if(n.source.buffer){';
+    const growth = "function enlargeMemory(){var e=Module.usingWasm?WASM_PAGE_SIZE:ASMJS_PAGE_SIZE,i=2147483648-e;if(HEAP32[DYNAMICTOP_PTR>>2]>i)return!1;var n=TOTAL_MEMORY;for(TOTAL_MEMORY=Math.max(TOTAL_MEMORY,MIN_TOTAL_MEMORY);TOTAL_MEMORY<HEAP32[DYNAMICTOP_PTR>>2];)TOTAL_MEMORY=TOTAL_MEMORY<268435456?alignUp(2*TOTAL_MEMORY,e):Math.min(alignUp(TOTAL_MEMORY+67108864,e),i);var t=Module.reallocBuffer(TOTAL_MEMORY);return t&&t.byteLength==TOTAL_MEMORY?(updateGlobalBuffer(t),updateGlobalBufferViews(),!0):(TOTAL_MEMORY=n,!1)}";
+    const growthFixed = "function enlargeMemory(){var e=Module.usingWasm?WASM_PAGE_SIZE:ASMJS_PAGE_SIZE,i=2147483648-e;if(HEAP32[DYNAMICTOP_PTR>>2]>i)return!1;var n=TOTAL_MEMORY;for(TOTAL_MEMORY=Math.max(TOTAL_MEMORY,MIN_TOTAL_MEMORY);TOTAL_MEMORY<HEAP32[DYNAMICTOP_PTR>>2];)TOTAL_MEMORY=TOTAL_MEMORY<268435456?alignUp(2*TOTAL_MEMORY,e):Math.min(alignUp(TOTAL_MEMORY+67108864,e),i);var t=Module.reallocBuffer(TOTAL_MEMORY);if((!t||t.byteLength!==TOTAL_MEMORY)&&Module.usingWasm){var required=alignUp(HEAP32[DYNAMICTOP_PTR>>2],e);if(required>n&&required<TOTAL_MEMORY){var padded=TOTAL_MEMORY;TOTAL_MEMORY=required;t=Module.reallocBuffer(required);Module.__hkHeapGrowthRecovery={paddedBytes:padded,requiredBytes:required,recovered:Boolean(t&&t.byteLength===required)};if(Module.printErr)Module.printErr(\"Hollow Knight: padded WASM growth failed; minimum-size retry \"+(Module.__hkHeapGrowthRecovery.recovered?\"succeeded\":\"failed\")+\" (\"+required+\" bytes)\");}}return t&&t.byteLength==TOTAL_MEMORY?(updateGlobalBuffer(t),updateGlobalBufferViews(),!0):(TOTAL_MEMORY=n,!1)}";
     const msync = 'doMsync:function(e,i,n,t){var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}';
-    for (const marker of [entry, tick, resume, ended, msync]) {
+    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth]) {
       if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
         throw new Error('Unexpected Unity framework layout; suspend/resume hooks were not applied.');
       }
@@ -1053,12 +1135,37 @@
       '};\n';
     // The legacy unmap syscall stages a full JS copy even for private maps.
     // Skip staging for immutable LazyFS assets only; preserve other files.
-    return source.replace(msync,
+    return source.replace(growth, growthFixed).replace(msync,
       'doMsync:function(e,i,n,t){if(i&&i.node.__hkReadOnlyAsset)return;var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}')
       .replace(entry, entry + bridge)
       .replace(tick, 'Module.__hkLifecycle.audioTick(e)')
       .replace(resume, 'function _JS_Sound_ResumeIfNeeded(){Module.__hkLifecycle.requestAudioResume()}')
-      .replace(ended, 'this.source.onended=function(){Module.__hkRuntime.audioEnded(function(){e&&dynCall("vi",e,[i]),o.setup()})}');
+      .replace(ended,
+        'var o=this,s=this.source;this.source.onended=function(){' +
+          's.__hkEnded=true;s.onended=null;s.disconnect();s.buffer=null;' +
+          'Module.__hkRuntime.audioEnded(function(){' +
+            'if(o.__hkReleased||o.source!==s)return;' +
+            'e&&dynCall("vi",e,[i]);' +
+            'if(!o.__hkReleased&&o.source===s)o.setup();' +
+          '});' +
+        '}')
+      .replace(stop, stop.replace('if(n.source.buffer)', 'if(n.source.buffer||n.source.__hkEnded)'))
+      .replace(setup,
+        'setup:function(){' +
+          'if(this.source){this.source.onended=null;this.source.disconnect();this.source.buffer=null;}' +
+          'this.source=WEBAudio.audioContext.createBufferSource();this.setupPanning();' +
+        '}')
+      .replace(release,
+        'function _JS_Sound_ReleaseInstance(e){' +
+          'var n=WEBAudio.audioInstances[e];WEBAudio.audioInstances[e]=null;' +
+          'if(!n)return;n.__hkReleased=true;' +
+          'if(n.source){' +
+            'var s=n.source;n.source=null;s.onended=null;' +
+            'try{s.stop(0);}catch(error){if(error.name!=="InvalidStateError")throw error;}' +
+            's.disconnect();s.buffer=null;n.panner.disconnect();n.gain.disconnect();' +
+          '}' +
+          'n.buffer=null;' +
+        '}');
   };
 
   global.installHollowKnightLifecycle = function (canvas) {
@@ -1107,6 +1214,7 @@
         hidden: hidden(), graphicsPending: state.graphicsPending, audioState: audio ? audio.state : state.audioState,
         lastError: state.lastError, storageError: state.storageError,
         heapBytes: module && module.HEAPU8 ? module.HEAPU8.byteLength : 0,
+        heapGrowthRecovery: module ? module.__hkHeapGrowthRecovery || null : null,
         contextLost: Boolean(module && module.ctx && module.ctx.isContextLost()),
         fsError: stats ? stats.lastError : '',
         fsSyncLoads: stats ? stats.syncPartLoads : 0,
@@ -1114,6 +1222,7 @@
         fsMmapCalls: stats ? stats.mmapCalls : 0,
         fsCacheBytes: stats ? stats.cacheBytes : 0,
         fsLastFailure: stats ? stats.lastFailure : null,
+        fsFirstFailure: global.__hkLastReadFailure || null,
         preload: global.__hkNeighborPreload ? {
           scene: global.__hkNeighborPreload.state.currentScene,
           source: global.__hkNeighborPreload.state.currentSource,
