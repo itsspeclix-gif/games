@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const BUILD_VERSION = '2026.09.27-r7';
+  const BUILD_VERSION = '2026.10.03-r10';
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
   const DEFAULT_READ_WINDOW_MS = 1800;
   // Scheduling policy, NOT a Unity scene-loaded event. Wait after scene
@@ -211,62 +211,34 @@
       state.lastError = message;
     }
 
-    // One retry loop covers headers, the ENTIRE body, and length/JSON validation.
-    // Retrying the same URL with reload repairs the cache key LazyFS will use.
-    async function fetchChecked(url, expected, signal) {
+    // Metadata remains asynchronous. Asset bodies use the filesystem's shared
+    // failover plan below, so preloading and demand reads agree on cache keys.
+    async function fetchMap(url) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const request = new AbortController();
-        const abort = () => request.abort();
-        if (signal) {
-          if (signal.aborted) request.abort();
-          signal.addEventListener('abort', abort, { once: true });
-        }
-        const timeout = setTimeout(abort, REQUEST_TIMEOUT_MS);
+        const timeout = setTimeout(() => request.abort(), REQUEST_TIMEOUT_MS);
         let response;
-        let reader;
         try {
-          if (attempt) state.warmRetries += 1;
-          state.warmRequests += 1;
           response = await preloadFetch(url, {
             cache: attempt === 0 ? 'force-cache' : 'reload',
             credentials: 'same-origin', signal: request.signal
           });
-          if (response.status !== 200) throw new Error('Preload HTTP ' + response.status + ' for ' + url);
-          if (expected === null) return JSON.parse(await response.text());
-          let bytes = 0;
-          if (response.body && typeof response.body.getReader === 'function') {
-            reader = response.body.getReader();
-            while (true) {
-              const item = await reader.read();
-              if (item.done) break;
-              bytes += item.value.byteLength;
-              if (bytes > expected) throw new Error('Oversized preload part ' + url);
-            }
-          } else {
-            // Retained compatibility path; exposed rather than silently hidden.
-            state.streamFallbacks += 1;
-            bytes = (await response.arrayBuffer()).byteLength;
-          }
-          if (bytes !== expected) throw new Error('Preload expected ' + expected + ' bytes, got ' + bytes + ' for ' + url);
-          if (request.signal.aborted) throw new Error('Preload request interrupted');
-          state.warmBytes += bytes;
-          return;
+          if (response.status !== 200) throw new Error('Preload map HTTP ' + response.status + ' for ' + url);
+          const map = JSON.parse(await response.text());
+          if (request.signal.aborted) throw new Error('Preload map request timed out');
+          return map;
         } catch (error) {
-          if (reader) {
-            try { await reader.cancel(); } catch (_) { /* Preserve the original failure. */ }
-          } else if (response && response.body) {
-            try { await response.body.cancel(); } catch (_) { /* Preserve the original failure. */ }
+          request.abort();
+          if (response && response.body) {
+            try { await response.body.cancel(); } catch (_) { /* Preserve the original error. */ }
           }
-          if ((signal && signal.aborted) || attempt === 2) throw error;
-        } finally {
-          if (reader) reader.releaseLock();
-          clearTimeout(timeout);
-          if (signal) signal.removeEventListener('abort', abort);
-        }
+          if (attempt === 2) throw error;
+        } finally { clearTimeout(timeout); }
       }
     }
 
-    const map = await fetchChecked(options.mapUrl || 'build/preload-analysis/preload-map.analysis.json', null);
+    if (typeof module.__hkWarmDataPart !== 'function') throw new Error('Preload requires the matching r8 filesystem');
+    const map = await fetchMap(options.mapUrl || 'build/preload-analysis/preload-map.analysis.json');
     if (!map || !map._meta || !map.scenes || typeof map.scenes !== 'object' ||
         map._meta.outerChunkSize !== partSize || map._meta.outerChunkCount !== partCount ||
         !Number.isSafeInteger(map._meta.logicalArchiveSize) ||
@@ -347,20 +319,29 @@
           state.warmController = request;
           state.activeWarmParts.add(part);
           state.status = 'warming';
+          let transport;
           try {
             const expected = Math.min(partSize, map._meta.logicalArchiveSize - (part - 1) * partSize);
-            await fetchChecked(url, expected, request.signal);
+            const result = await module.__hkWarmDataPart(part - 1, request.signal);
+            transport = result.transport;
             if (!request.signal.aborted) {
-              state.warmedParts.set(part, { url, time: performance.now() });
+              state.warmedParts.set(part, { url: result.url, time: performance.now() });
+              state.warmBytes += expected;
               state.failedParts.delete(part);
             }
           } catch (error) {
+            transport = error && error.detail && error.detail.transport;
             if (!request.signal.aborted) {
               state.warmFailures += 1;
               state.failedParts.set(part, performance.now() + RETRY_COOLDOWN_MS);
-              reportError(error, { part, url });
+              reportError(error, { part, url, transport });
             }
           } finally {
+            if (transport) {
+              state.warmRequests += transport.attempts.length;
+              state.warmRetries += Math.max(0, transport.attempts.length - 1);
+              state.streamFallbacks += transport.streamFallbacks;
+            }
             state.activeWarmParts.delete(part);
             state.warmController = null;
           }
