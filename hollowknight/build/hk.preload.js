@@ -1,14 +1,15 @@
 (function () {
   'use strict';
 
-  const BUILD_VERSION = '2026.10.03-r10';
+  const BUILD_VERSION = '2026.10.03-r11';
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
   const DEFAULT_READ_WINDOW_MS = 1800;
   // Scheduling policy, NOT a Unity scene-loaded event. Wait after scene
   // identification or a source-cache MISS. Cached reads must not starve warming.
   const ASSET_QUIET_MS = 1500;
-  // Observed frame gap/heap growth, not a guessed total-RAM limit. Only optional
-  // downloads back off; required reads and Unity frames are never gated here.
+  // Frame gaps are diagnostic only: CPU/GC/network stalls are not proof of
+  // memory pressure and must not repeatedly cancel or starve preloading.
+  // Actual WASM growth still defers optional downloads; required reads continue.
   const FRAME_GAP_MS = 250;
   const RECOVERY_QUIET_MS = 2000;
   const WARM_TTL_MS = 120000;
@@ -426,8 +427,8 @@
       state.lastFrameTime = now;
       if (grew) state.heapGrowthEvents += 1;
       if (gap >= FRAME_GAP_MS) state.longFrameGaps += 1;
-      if (grew || gap >= FRAME_GAP_MS) {
-        state.lastRecoveryReason = grew ? 'wasm-heap-growth' : 'long-frame-gap';
+      if (grew) {
+        state.lastRecoveryReason = 'wasm-heap-growth';
         state.runtimeHoldUntil = now + RECOVERY_QUIET_MS;
         if (state.warmController && !state.warmController.signal.aborted) {
           state.recoveryPauses += 1;
