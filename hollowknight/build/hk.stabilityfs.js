@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.10.03-r11';
+  const FS_VERSION = '2026.10.04-r12';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -1088,7 +1088,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.10.03-r11';
+  const VERSION = '2026.10.04-r12';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
@@ -1103,14 +1103,22 @@
     const release = 'function _JS_Sound_ReleaseInstance(e){WEBAudio.audioInstances[e]=null}';
     const stop = 'function _JS_Sound_Stop(e,i){if(0!=WEBAudio.audioWebEnabled){var n=WEBAudio.audioInstances[e];if(n.source.buffer){';
     const growth = "function enlargeMemory(){var e=Module.usingWasm?WASM_PAGE_SIZE:ASMJS_PAGE_SIZE,i=2147483648-e;if(HEAP32[DYNAMICTOP_PTR>>2]>i)return!1;var n=TOTAL_MEMORY;for(TOTAL_MEMORY=Math.max(TOTAL_MEMORY,MIN_TOTAL_MEMORY);TOTAL_MEMORY<HEAP32[DYNAMICTOP_PTR>>2];)TOTAL_MEMORY=TOTAL_MEMORY<268435456?alignUp(2*TOTAL_MEMORY,e):Math.min(alignUp(TOTAL_MEMORY+67108864,e),i);var t=Module.reallocBuffer(TOTAL_MEMORY);return t&&t.byteLength==TOTAL_MEMORY?(updateGlobalBuffer(t),updateGlobalBufferViews(),!0):(TOTAL_MEMORY=n,!1)}";
-    const growthFixed = "function enlargeMemory(){var e=Module.usingWasm?WASM_PAGE_SIZE:ASMJS_PAGE_SIZE,i=2147483648-e;if(HEAP32[DYNAMICTOP_PTR>>2]>i)return!1;var n=TOTAL_MEMORY;for(TOTAL_MEMORY=Math.max(TOTAL_MEMORY,MIN_TOTAL_MEMORY);TOTAL_MEMORY<HEAP32[DYNAMICTOP_PTR>>2];)TOTAL_MEMORY=TOTAL_MEMORY<268435456?alignUp(2*TOTAL_MEMORY,e):Math.min(alignUp(TOTAL_MEMORY+67108864,e),i);var t=Module.reallocBuffer(TOTAL_MEMORY);if((!t||t.byteLength!==TOTAL_MEMORY)&&Module.usingWasm){var required=alignUp(HEAP32[DYNAMICTOP_PTR>>2],e);if(required>n&&required<TOTAL_MEMORY){var padded=TOTAL_MEMORY;TOTAL_MEMORY=required;t=Module.reallocBuffer(required);Module.__hkHeapGrowthRecovery={paddedBytes:padded,requiredBytes:required,recovered:Boolean(t&&t.byteLength===required)};if(Module.printErr)Module.printErr(\"Hollow Knight: padded WASM growth failed; minimum-size retry \"+(Module.__hkHeapGrowthRecovery.recovered?\"succeeded\":\"failed\")+\" (\"+required+\" bytes)\");}}return t&&t.byteLength==TOTAL_MEMORY?(updateGlobalBuffer(t),updateGlobalBufferViews(),!0):(TOTAL_MEMORY=n,!1)}";
+    const growthFixed = "function enlargeMemory(){var e=Module.usingWasm?WASM_PAGE_SIZE:ASMJS_PAGE_SIZE,i=2147483648-e;if(HEAP32[DYNAMICTOP_PTR>>2]>i)return!1;var n=TOTAL_MEMORY;for(TOTAL_MEMORY=Math.max(TOTAL_MEMORY,MIN_TOTAL_MEMORY);TOTAL_MEMORY<HEAP32[DYNAMICTOP_PTR>>2];)TOTAL_MEMORY=TOTAL_MEMORY<268435456?alignUp(2*TOTAL_MEMORY,e):Math.min(alignUp(TOTAL_MEMORY+67108864,e),i);if(Module.usingWasm&&Module.__hkMaxHeapGrowthSlack>0){TOTAL_MEMORY=Math.min(TOTAL_MEMORY,alignUp(HEAP32[DYNAMICTOP_PTR>>2],Module.__hkMaxHeapGrowthSlack));}var t=Module.reallocBuffer(TOTAL_MEMORY);if((!t||t.byteLength!==TOTAL_MEMORY)&&Module.usingWasm){var required=alignUp(HEAP32[DYNAMICTOP_PTR>>2],e);if(required>n&&required<TOTAL_MEMORY){var padded=TOTAL_MEMORY;TOTAL_MEMORY=required;t=Module.reallocBuffer(required);Module.__hkHeapGrowthRecovery={paddedBytes:padded,requiredBytes:required,recovered:Boolean(t&&t.byteLength===required)};if(Module.printErr)Module.printErr(\"Hollow Knight: padded WASM growth failed; minimum-size retry \"+(Module.__hkHeapGrowthRecovery.recovered?\"succeeded\":\"failed\")+\" (\"+required+\" bytes)\");}}return t&&t.byteLength==TOTAL_MEMORY?(updateGlobalBuffer(t),updateGlobalBufferViews(),!0):(TOTAL_MEMORY=n,!1)}";
+    // Writable MEMFS files must stay byte arrays; promoting them to generic
+    // JS number arrays multiplies their storage and slows every later write.
+    const expand = "expandFileStorage:function(e,i){if(e.contents&&e.contents.subarray&&i>e.contents.length&&(e.contents=MEMFS.getFileDataAsRegularArray(e),e.usedBytes=e.contents.length),!e.contents||e.contents.subarray){var n=e.contents?e.contents.length:0;if(n>=i)return;i=Math.max(i,n*(n<1048576?2:1.125)|0),0!=n&&(i=Math.max(i,256));var t=e.contents;return e.contents=new Uint8Array(i),void(e.usedBytes>0&&e.contents.set(t.subarray(0,e.usedBytes),0))}for(!e.contents&&i>0&&(e.contents=[]);e.contents.length<i;)e.contents.push(0)}";
+    const expandFixed = "expandFileStorage:function(e,i){\n  var n=e.contents?e.contents.length:0;\n  if(n>=i)return;\n  i=Math.max(i,Math.floor(n*(n<1048576?2:1.125)));\n  if(n)i=Math.max(i,256);\n  var t=e.contents,r=new Uint8Array(i);\n  if(e.usedBytes){\n    if(t.subarray)r.set(t.subarray(0,e.usedBytes));\n    else for(var o=0;o<e.usedBytes;o++)r[o]=t[o];\n  }\n  e.contents=r;\n}";
+    const deleteBuffers = "function _glDeleteBuffers(e,i){for(var n=0;n<e;n++){var t=HEAP32[i+4*n>>2],r=GL.buffers[t];r&&(GLctx.deleteBuffer(r),r.name=0,GL.buffers[t]=null,t==GL.currArrayBuffer&&(GL.currArrayBuffer=0),t==GL.currElementArrayBuffer&&(GL.currElementArrayBuffer=0))}}";
+    const deleteBuffersFixed = "function _glDeleteBuffers(e,i){\n  for(var n=0;n<e;n++){\n    var t=HEAP32[i+4*n>>2],r=GL.buffers[t];\n    if(!r)continue;\n    GLctx.deleteBuffer(r);\n    var mapped=GL.mappedBuffers[t];\n    if(mapped){\n      _free(mapped.mem);delete GL.mappedBuffers[t];\n      Module.__hkMemoryFixStats.deletedMappings++;\n      Module.__hkMemoryFixStats.deletedMappingBytes+=mapped.length;\n    }\n    r.name=0;GL.buffers[t]=null;\n    if(t===GL.currArrayBuffer)GL.currArrayBuffer=0;\n    if(t===GL.currElementArrayBuffer)GL.currElementArrayBuffer=0;\n    if(t===GLctx.currentPixelPackBufferBinding)GLctx.currentPixelPackBufferBinding=0;\n    if(t===GLctx.currentPixelUnpackBufferBinding)GLctx.currentPixelUnpackBufferBinding=0;\n  }\n}";
+    const unmapBuffer = "function _glUnmapBuffer(e){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glUnmapBuffer\"),0;var i=emscriptenWebGLGetBufferBinding(e),n=GL.mappedBuffers[i];return n?(GL.mappedBuffers[i]=null,16&n.access||(GL.currentContext.supportsWebGL2EntryPoints?GLctx.bufferSubData(e,n.offset,HEAPU8,n.mem,n.length):GLctx.bufferSubData(e,n.offset,HEAPU8.subarray(n.mem,n.mem+n.length))),_free(n.mem),1):(GL.recordError(1282),Module.printError(\"buffer was never mapped in glUnmapBuffer\"),0)}";
+    const unmapBufferFixed = "function _glUnmapBuffer(e){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glUnmapBuffer\"),0;var i=emscriptenWebGLGetBufferBinding(e),n=GL.mappedBuffers[i];return n?(delete GL.mappedBuffers[i],16&n.access||(GL.currentContext.supportsWebGL2EntryPoints?GLctx.bufferSubData(e,n.offset,HEAPU8,n.mem,n.length):GLctx.bufferSubData(e,n.offset,HEAPU8.subarray(n.mem,n.mem+n.length))),_free(n.mem),1):(GL.recordError(1282),Module.printError(\"buffer was never mapped in glUnmapBuffer\"),0)}";
     const msync = 'doMsync:function(e,i,n,t){var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}';
-    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth]) {
+    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer]) {
       if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
-        throw new Error('Unexpected Unity framework layout; suspend/resume hooks were not applied.');
+        throw new Error('Unexpected Unity framework layout; runtime patches were not applied.');
       }
     }
-    const bridge = '\nModule.__hkRuntime = {' +
+    const bridge = '\nModule.__hkMemoryFixStats={deletedMappings:0,deletedMappingBytes:0};Module.__hkRuntime = {' +
       'version:"' + VERSION + '",' +
       'get loop(){return Browser.mainLoop;},' +
       'get audio(){return WEBAudio.audioWebEnabled ? WEBAudio.audioContext : null;},' +
@@ -1135,7 +1143,9 @@
       '};\n';
     // The legacy unmap syscall stages a full JS copy even for private maps.
     // Skip staging for immutable LazyFS assets only; preserve other files.
-    return source.replace(growth, growthFixed).replace(msync,
+    return source.replace(expand, expandFixed)
+      .replace(deleteBuffers, deleteBuffersFixed).replace(unmapBuffer, unmapBufferFixed)
+      .replace(growth, growthFixed).replace(msync,
       'doMsync:function(e,i,n,t){if(i&&i.node.__hkReadOnlyAsset)return;var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}')
       .replace(entry, entry + bridge)
       .replace(tick, 'Module.__hkLifecycle.audioTick(e)')
@@ -1215,6 +1225,8 @@
         lastError: state.lastError, storageError: state.storageError,
         heapBytes: module && module.HEAPU8 ? module.HEAPU8.byteLength : 0,
         heapGrowthRecovery: module ? module.__hkHeapGrowthRecovery || null : null,
+        heapGrowthSlackLimitBytes: module ? module.__hkMaxHeapGrowthSlack || 0 : 0,
+        releasedGraphicsUploadMappings: module ? module.__hkMemoryFixStats || null : null,
         contextLost: Boolean(module && module.ctx && module.ctx.isContextLost()),
         fsError: stats ? stats.lastError : '',
         fsSyncLoads: stats ? stats.syncPartLoads : 0,
