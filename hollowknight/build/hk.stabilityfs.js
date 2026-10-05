@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.10.04-r13';
+  const FS_VERSION = '2026.10.04-r14';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -1047,12 +1047,15 @@
       }
     }
 
+    // Named handlers let permanent session teardown release ancestor references.
+    const visibleFocus = event => {
+      if (!event.currentTarget.hidden) gameWindow.setTimeout(focusCanvas, 0);
+    };
+    const scheduledFocus = () => gameWindow.setTimeout(focusCanvas, 0);
     for (const documentRef of ancestorDocuments) {
       documentRef.addEventListener('keydown', forwardKeyboard, true);
       documentRef.addEventListener('keyup', forwardKeyboard, true);
-      documentRef.addEventListener('visibilitychange', () => {
-        if (!documentRef.hidden) gameWindow.setTimeout(focusCanvas, 0);
-      });
+      documentRef.addEventListener('visibilitychange', visibleFocus);
     }
 
     for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
@@ -1065,14 +1068,24 @@
       );
     }
 
-    gameDocument.addEventListener('visibilitychange', () => {
-      if (!gameDocument.hidden) gameWindow.setTimeout(focusCanvas, 0);
-    });
-    gameWindow.addEventListener(
-      'focus',
-      () => gameWindow.setTimeout(focusCanvas, 0),
-      true
-    );
+    gameDocument.addEventListener('visibilitychange', visibleFocus);
+    gameWindow.addEventListener('focus', scheduledFocus, true);
+
+    canvas.__hkKeyboardBridgeCleanup = () => {
+      for (const documentRef of ancestorDocuments) {
+        documentRef.removeEventListener('keydown', forwardKeyboard, true);
+        documentRef.removeEventListener('keyup', forwardKeyboard, true);
+        documentRef.removeEventListener('visibilitychange', visibleFocus);
+      }
+      for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
+        gameDocument.removeEventListener(type, focusCanvas, true);
+      }
+      gameDocument.removeEventListener('visibilitychange', visibleFocus);
+      gameWindow.removeEventListener('focus', scheduledFocus, true);
+      ancestorDocuments.length = 0;
+      delete canvas.__hkKeyboardBridgeCleanup;
+      delete canvas.__hkKeyboardBridgeInstalled;
+    };
 
     canvas.__hkKeyboardBridgeInstalled = true;
     focusCanvas();
@@ -1088,7 +1101,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.10.04-r13';
+  const VERSION = '2026.10.04-r14';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
@@ -1120,6 +1133,18 @@
     const programLink = "function _glLinkProgram(e){GLctx.linkProgram(GL.programs[e]),GL.programInfos[e]=null,GL.populateUniformTable(e)}";
     const programUse = "function _glUseProgram(e){GLctx.useProgram(e?GL.programs[e]:null)}";
     const contextDelete = "deleteContext:function(e){e&&(GL.currentContext===GL.contexts[e]&&(GL.currentContext=null),\"object\"==typeof JSEvents&&JSEvents.removeAllHandlersOnTarget(GL.contexts[e].GLctx.canvas),GL.contexts[e]&&GL.contexts[e].GLctx.canvas&&(GL.contexts[e].GLctx.canvas.GLctxObject=void 0),_free(GL.contexts[e]),GL.contexts[e]=null)}";
+    const objectId = 'getNewId:function(e){for(var i=GL.counter++,n=e.length;n<i;n++)e[n]=null;return i}';
+    // These tables use numeric lookups, not array iteration. The source-layout
+    // audit below rejects a build with array-method consumers before patching.
+    const objectTables = ['buffers', 'programs', 'framebuffers', 'renderbuffers',
+      'shaders', 'vaos', 'textures', 'queries', 'samplers', 'transformFeedbacks', 'syncs'];
+    for (const name of objectTables) {
+      const marker = ',' + name + ':[]';
+      if (source.indexOf(marker) < 0 || source.indexOf(marker) !== source.lastIndexOf(marker) ||
+          new RegExp('GL\\.' + name + '\\s*\\.').test(source)) {
+        throw new Error('Unexpected Unity graphics table layout; runtime patches were not applied.');
+      }
+    }
     const unmapCleanup = "SYSCALLS.mappings[n]=null,r.allocated&&_free(r.malloc)";
     const registryReplacements = {
   "uniformTable": "uniforms:Object.create(null),shaders:[]",
@@ -1130,7 +1155,7 @@
   "contextDelete": "deleteContext:function(e){\n  if(!e)return;\n  var context=GL.contexts[e];\n  if(context.__hkDeletedUniforms){\n    GL.releaseProgramUniforms(context.__hkDeletedUniforms.info);\n    delete context.__hkDeletedUniforms;\n  }\n  if(GL.currentContext===context)GL.currentContext=null;\n  if(typeof JSEvents===\"object\")JSEvents.removeAllHandlersOnTarget(context.GLctx.canvas);\n  if(context.GLctx.canvas)context.GLctx.canvas.GLctxObject=void 0;\n  _free(e);GL.contexts[e]=null;\n}",
   "unmapCleanup": "delete SYSCALLS.mappings[n],r.allocated&&_free(r.malloc)"
 };
-    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer, uniformTable, uniformPopulate, programDelete, programLink, programUse, contextDelete, unmapCleanup]) {
+    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer, uniformTable, uniformPopulate, programDelete, programLink, programUse, contextDelete, unmapCleanup, objectId]) {
       if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
         throw new Error('Unexpected Unity framework layout; runtime patches were not applied.');
       }
@@ -1161,7 +1186,7 @@
     // The legacy unmap syscall stages a full JS copy even for private maps.
     // No backing file and private/immutable maps cannot need write-back.
     // Keep the original snapshot for ordinary shared writable mappings.
-    return source
+    let patched = source
       .replace(uniformTable, registryReplacements.uniformTable)
       .replace(uniformPopulate, registryReplacements.uniformPopulate)
       .replace(programDelete, registryReplacements.programDelete)
@@ -1202,6 +1227,15 @@
           '}' +
           'n.buffer=null;' +
         '}');
+    patched = patched.replace(objectId, 'getNewId:function(){return GL.counter++}');
+    for (const name of objectTables) {
+      patched = patched.replace(',' + name + ':[]', ',' + name + ':Object.create(null)');
+    }
+    // Released entries only. No ID reuse, live-object eviction, per-frame scan,
+    // added graphics queries, or changes to the actual native delete calls.
+    patched = patched.replace(/GL\.(buffers|programs|framebuffers|renderbuffers|shaders|vaos|textures|queries|samplers|transformFeedbacks|syncs|programInfos)\[([^\]]+)\]=null/g,
+      'delete GL.$1[$2]');
+    return patched;
   };
 
   global.installHollowKnightLifecycle = function (canvas) {
@@ -1473,7 +1507,15 @@
         record('visible'); show();
       }
     }
-    function pagehide(event) { hiddenViews.add(event.currentTarget); pause('pagehide'); }
+    function pagehide(event) {
+      // Only this document's FINAL departure disposes the game. Hidden tabs,
+      // screen locking, ancestor events and bfcache pagehide retain Resume.
+      if (event.currentTarget === view && event.persisted === false) {
+        controller.cleanup();
+        return;
+      }
+      hiddenViews.add(event.currentTarget); pause('pagehide');
+    }
     function pageshow(event) { hiddenViews.delete(event.currentTarget); visibility(); }
     function freeze(event) { frozenDocuments.add(event.currentTarget); pause('freeze'); }
     function thaw(event) { frozenDocuments.delete(event.currentTarget); visibility(); }
@@ -1508,9 +1550,11 @@
     const controller = {
       version: VERSION, state, report, resume, pause, requestAudioResume,
       bind(unityModule) {
+        if (disposed) throw new Error('The Hollow Knight session has already ended.');
         module = unityModule; runtime = module.__hkRuntime;
         if (!runtime || runtime.version !== VERSION) throw new Error('Unity suspend/resume bridge is unavailable.');
         module.__hkLifecycle = controller;
+        module.deinitializers.push(controller.cleanup);
         if (state.paused || hidden()) pause('bind-hidden');
       },
       beforeFrame() {
@@ -1537,6 +1581,8 @@
       cleanup() {
         if (disposed) return;
         pause('cleanup'); disposed = true; state.phase = 'disposed';
+        if (global.__hkNeighborPreload) global.__hkNeighborPreload.cleanup();
+        if (canvas.__hkKeyboardBridgeCleanup) canvas.__hkKeyboardBridgeCleanup();
         for (const documentRef of documents) {
           documentRef.removeEventListener('visibilitychange', visibility, true);
           documentRef.removeEventListener('freeze', freeze, true);
@@ -1548,8 +1594,29 @@
         }
         canvas.removeEventListener('webglcontextlost', contextLost, true);
         canvas.removeEventListener('webglcontextrestored', contextRestored, true);
-        if (audio) audio.removeEventListener('statechange', audioChanged);
+        if (audio) {
+          audio.removeEventListener('statechange', audioChanged);
+          // The session is ending, NOT temporarily suspended. A closed context
+          // releases its browser audio resources; this is never done on hide.
+          if (audio.state !== 'closed') {
+            try {
+              Promise.resolve(audio.close()).catch(error => {
+                state.lastError = 'Audio cleanup failed: ' + String(error.message || error);
+                console.warn(state.lastError);
+              });
+            } catch (error) {
+              state.lastError = 'Audio cleanup failed: ' + String(error.message || error);
+              console.warn(state.lastError);
+            }
+          }
+        }
         if (panel) panel.remove();
+        if (global.__hkUnityInstance && global.__hkUnityInstance.Module === module) {
+          delete global.__hkUnityInstance;
+        }
+        module = runtime = audio = pendingAudio = null;
+        documents.length = views.length = 0;
+        hiddenViews.clear(); frozenDocuments.clear();
         if (global.__hkLifecycle === controller) delete global.__hkLifecycle;
       }
     };
