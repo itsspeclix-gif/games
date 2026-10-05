@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const BUILD_VERSION = '2026.10.04-r13';
+  const BUILD_VERSION = '2026.10.04-r14';
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
   const DEFAULT_READ_WINDOW_MS = 1800;
   // Scheduling policy, NOT a Unity scene-loaded event. Wait after scene
