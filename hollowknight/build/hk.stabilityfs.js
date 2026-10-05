@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.10.04-r12';
+  const FS_VERSION = '2026.10.04-r13';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -1088,7 +1088,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.10.04-r12';
+  const VERSION = '2026.10.04-r13';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
@@ -1113,12 +1113,29 @@
     const unmapBuffer = "function _glUnmapBuffer(e){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glUnmapBuffer\"),0;var i=emscriptenWebGLGetBufferBinding(e),n=GL.mappedBuffers[i];return n?(GL.mappedBuffers[i]=null,16&n.access||(GL.currentContext.supportsWebGL2EntryPoints?GLctx.bufferSubData(e,n.offset,HEAPU8,n.mem,n.length):GLctx.bufferSubData(e,n.offset,HEAPU8.subarray(n.mem,n.mem+n.length))),_free(n.mem),1):(GL.recordError(1282),Module.printError(\"buffer was never mapped in glUnmapBuffer\"),0)}";
     const unmapBufferFixed = "function _glUnmapBuffer(e){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glUnmapBuffer\"),0;var i=emscriptenWebGLGetBufferBinding(e),n=GL.mappedBuffers[i];return n?(delete GL.mappedBuffers[i],16&n.access||(GL.currentContext.supportsWebGL2EntryPoints?GLctx.bufferSubData(e,n.offset,HEAPU8,n.mem,n.length):GLctx.bufferSubData(e,n.offset,HEAPU8.subarray(n.mem,n.mem+n.length))),_free(n.mem),1):(GL.recordError(1282),Module.printError(\"buffer was never mapped in glUnmapBuffer\"),0)}";
     const msync = 'doMsync:function(e,i,n,t){var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}';
-    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer]) {
+    // r13: release no-longer-valid program locations without recycling IDs.
+    const uniformTable = "uniforms:[],shaders:[]";
+    const uniformPopulate = "populateUniformTable:function(e){var i=GL.programs[e];GL.programInfos[e]={uniforms:{},maxUniformLength:0,maxAttributeLength:-1,maxUniformBlockNameLength:-1};for(var n=GL.programInfos[e],t=n.uniforms,r=GLctx.getProgramParameter(i,GLctx.ACTIVE_UNIFORMS),o=0;o<r;++o){var _=GLctx.getActiveUniform(i,o),a=_.name;if(n.maxUniformLength=Math.max(n.maxUniformLength,a.length+1),-1!==a.indexOf(\"]\",a.length-1)){var l=a.lastIndexOf(\"[\");a=a.slice(0,l)}var u=GLctx.getUniformLocation(i,a);if(null!=u){var s=GL.getNewId(GL.uniforms);t[a]=[_.size,s],GL.uniforms[s]=u;for(var c=1;c<_.size;++c){var f=a+\"[\"+c+\"]\";u=GLctx.getUniformLocation(i,f),s=GL.getNewId(GL.uniforms),GL.uniforms[s]=u}}}}";
+    const programDelete = "function _glDeleteProgram(e){if(e){var i=GL.programs[e];i?(GLctx.deleteProgram(i),i.name=0,GL.programs[e]=null,GL.programInfos[e]=null):GL.recordError(1281)}}";
+    const programLink = "function _glLinkProgram(e){GLctx.linkProgram(GL.programs[e]),GL.programInfos[e]=null,GL.populateUniformTable(e)}";
+    const programUse = "function _glUseProgram(e){GLctx.useProgram(e?GL.programs[e]:null)}";
+    const contextDelete = "deleteContext:function(e){e&&(GL.currentContext===GL.contexts[e]&&(GL.currentContext=null),\"object\"==typeof JSEvents&&JSEvents.removeAllHandlersOnTarget(GL.contexts[e].GLctx.canvas),GL.contexts[e]&&GL.contexts[e].GLctx.canvas&&(GL.contexts[e].GLctx.canvas.GLctxObject=void 0),_free(GL.contexts[e]),GL.contexts[e]=null)}";
+    const unmapCleanup = "SYSCALLS.mappings[n]=null,r.allocated&&_free(r.malloc)";
+    const registryReplacements = {
+  "uniformTable": "uniforms:Object.create(null),shaders:[]",
+  "uniformPopulate": "releaseProgramUniforms:function(info){\n  if(!info)return;\n  for(var name in info.uniforms){\n    var range=info.uniforms[name];\n    for(var j=0;j<range[0];j++){\n      delete GL.uniforms[range[1]+j];\n      Module.__hkMemoryFixStats.uniformLocationsReleased++;\n    }\n  }\n},populateUniformTable:function(e){var i=GL.programs[e];GL.programInfos[e]={uniforms:{},maxUniformLength:0,maxAttributeLength:-1,maxUniformBlockNameLength:-1};for(var n=GL.programInfos[e],t=n.uniforms,r=GLctx.getProgramParameter(i,GLctx.ACTIVE_UNIFORMS),o=0;o<r;++o){var _=GLctx.getActiveUniform(i,o),a=_.name;if(n.maxUniformLength=Math.max(n.maxUniformLength,a.length+1),-1!==a.indexOf(\"]\",a.length-1)){var l=a.lastIndexOf(\"[\");a=a.slice(0,l)}var u=GLctx.getUniformLocation(i,a);if(null!=u){var s=GL.counter++;t[a]=[_.size,s],GL.uniforms[s]=u;for(var c=1;c<_.size;++c){var f=a+\"[\"+c+\"]\";u=GLctx.getUniformLocation(i,f),s=GL.counter++,GL.uniforms[s]=u}}}}",
+  "programLink": "function _glLinkProgram(e){\n  GLctx.linkProgram(GL.programs[e]);\n  GL.releaseProgramUniforms(GL.programInfos[e]);\n  GL.programInfos[e]=null;GL.populateUniformTable(e);\n}",
+  "programDelete": "function _glDeleteProgram(e){\n  if(!e)return;\n  var p=GL.programs[e];\n  if(!p){GL.recordError(1281);return;}\n  GLctx.deleteProgram(p);\n  var info=GL.programInfos[e];\n  // A deleted CURRENT program can still draw/use existing locations until a\n  // successful switch. Retain only that one set per context until then.\n  if(GLctx.getParameter(35725)===p){\n    GL.currentContext.__hkDeletedUniforms={program:p,info:info};\n  }else GL.releaseProgramUniforms(info);\n  p.name=0;GL.programs[e]=null;GL.programInfos[e]=null;\n}",
+  "programUse": "function _glUseProgram(e){\n  GLctx.useProgram(e?GL.programs[e]:null);\n  var context=GL.currentContext,pending=context&&context.__hkDeletedUniforms;\n  // Query only in the exceptional delete-while-bound state. A failed switch\n  // must not destroy locations still used by the current executable.\n  if(pending&&GLctx.getParameter(35725)!==pending.program){\n    GL.releaseProgramUniforms(pending.info);delete context.__hkDeletedUniforms;\n  }\n}",
+  "contextDelete": "deleteContext:function(e){\n  if(!e)return;\n  var context=GL.contexts[e];\n  if(context.__hkDeletedUniforms){\n    GL.releaseProgramUniforms(context.__hkDeletedUniforms.info);\n    delete context.__hkDeletedUniforms;\n  }\n  if(GL.currentContext===context)GL.currentContext=null;\n  if(typeof JSEvents===\"object\")JSEvents.removeAllHandlersOnTarget(context.GLctx.canvas);\n  if(context.GLctx.canvas)context.GLctx.canvas.GLctxObject=void 0;\n  _free(e);GL.contexts[e]=null;\n}",
+  "unmapCleanup": "delete SYSCALLS.mappings[n],r.allocated&&_free(r.malloc)"
+};
+    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer, uniformTable, uniformPopulate, programDelete, programLink, programUse, contextDelete, unmapCleanup]) {
       if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
         throw new Error('Unexpected Unity framework layout; runtime patches were not applied.');
       }
     }
-    const bridge = '\nModule.__hkMemoryFixStats={deletedMappings:0,deletedMappingBytes:0};Module.__hkRuntime = {' +
+    const bridge = '\nModule.__hkMemoryFixStats={deletedMappings:0,deletedMappingBytes:0,uniformLocationsReleased:0,unmapCopiesAvoided:0,unmapCopyBytesAvoided:0};Module.__hkRuntime = {' +
       'version:"' + VERSION + '",' +
       'get loop(){return Browser.mainLoop;},' +
       'get audio(){return WEBAudio.audioWebEnabled ? WEBAudio.audioContext : null;},' +
@@ -1142,11 +1159,20 @@
       '}' +
       '};\n';
     // The legacy unmap syscall stages a full JS copy even for private maps.
-    // Skip staging for immutable LazyFS assets only; preserve other files.
-    return source.replace(expand, expandFixed)
+    // No backing file and private/immutable maps cannot need write-back.
+    // Keep the original snapshot for ordinary shared writable mappings.
+    return source
+      .replace(uniformTable, registryReplacements.uniformTable)
+      .replace(uniformPopulate, registryReplacements.uniformPopulate)
+      .replace(programDelete, registryReplacements.programDelete)
+      .replace(programLink, registryReplacements.programLink)
+      .replace(programUse, registryReplacements.programUse)
+      .replace(contextDelete, registryReplacements.contextDelete)
+      .replace(unmapCleanup, registryReplacements.unmapCleanup)
+      .replace(expand, expandFixed)
       .replace(deleteBuffers, deleteBuffersFixed).replace(unmapBuffer, unmapBufferFixed)
       .replace(growth, growthFixed).replace(msync,
-      'doMsync:function(e,i,n,t){if(i&&i.node.__hkReadOnlyAsset)return;var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}')
+      "doMsync:function(e,i,n,t){if(!i||(t&2)||i.node.__hkReadOnlyAsset){Module.__hkMemoryFixStats.unmapCopiesAvoided++;Module.__hkMemoryFixStats.unmapCopyBytesAvoided+=n;return;}var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}")
       .replace(entry, entry + bridge)
       .replace(tick, 'Module.__hkLifecycle.audioTick(e)')
       .replace(resume, 'function _JS_Sound_ResumeIfNeeded(){Module.__hkLifecycle.requestAudioResume()}')
