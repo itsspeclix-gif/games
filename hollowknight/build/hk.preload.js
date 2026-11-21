@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const BUILD_VERSION = '2026.10.04-r14';
+  const BUILD_VERSION = '2026.11.20-r16';
   const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
   const DEFAULT_READ_WINDOW_MS = 1800;
   // Scheduling policy, NOT a Unity scene-loaded event. Wait after scene
@@ -67,6 +67,32 @@
     }
     if (target !== size) throw new Error('Incorrect LZ4 decoded size');
     return output;
+  }
+
+  // The published analysis map contains block lists and repeated neighbor
+  // expansions used only by offline tooling. Retain only runtime fields;
+  // all scene evidence and preload ordering below remain identical.
+  function compactPreloadMap(input) {
+    if (!input || !input._meta || !input.scenes || typeof input.scenes !== 'object') return input;
+    const scenes = Object.create(null);
+    for (const name of Object.keys(input.scenes)) {
+      const record = input.scenes[name];
+      if (!record || typeof record !== 'object') throw new Error('Invalid preload scene ' + name);
+      scenes[name] = {
+        levelFile: record.levelFile,
+        resourceFile: record.resourceFile,
+        dataUnity3dChunks: record.dataUnity3dChunks,
+        directPreloadChunks: record.directPreloadChunks,
+        neighbors: record.neighbors
+      };
+    }
+    const meta = input._meta;
+    return { _meta: {
+      outerChunkSize: meta.outerChunkSize, outerChunkCount: meta.outerChunkCount,
+      logicalArchiveSize: meta.logicalArchiveSize,
+      dataUnity3dOuterOffset: meta.dataUnity3dOuterOffset,
+      dataUnity3dSize: meta.dataUnity3dSize, unityFS: meta.unityFS
+    }, scenes };
   }
 
   function buildSceneRanges(FS, map) {
@@ -225,7 +251,7 @@
             credentials: 'same-origin', signal: request.signal
           });
           if (response.status !== 200) throw new Error('Preload map HTTP ' + response.status + ' for ' + url);
-          const map = JSON.parse(await response.text());
+          const map = compactPreloadMap(JSON.parse(await response.text()));
           if (request.signal.aborted) throw new Error('Preload map request timed out');
           return map;
         } catch (error) {
