@@ -4,7 +4,7 @@
   const MAGIC = 'UnityWebData1.0\0';
   const HEADER_PREFIX_SIZE = MAGIC.length + 4;
   const CACHE_LIMIT = 60 * 1024 * 1024;
-  const FS_VERSION = '2026.10.04-r14';
+  const FS_VERSION = '2026.11.20-r16';
   // Captured before index.html installs its startup-only fetch wrapper, so
   // bootstrap has one bounded retry loop covering headers AND body reads.
   const dataFetch = global.fetch.bind(global);
@@ -1101,7 +1101,7 @@
 // This does not recreate a lost GPU context or revive an OS-terminated page.
 (function (global) {
   'use strict';
-  const VERSION = '2026.10.04-r14';
+  const VERSION = '2026.11.20-r16';
   const AUDIO_WAIT_MS = 5000;
 
   // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
@@ -1124,7 +1124,20 @@
     const deleteBuffers = "function _glDeleteBuffers(e,i){for(var n=0;n<e;n++){var t=HEAP32[i+4*n>>2],r=GL.buffers[t];r&&(GLctx.deleteBuffer(r),r.name=0,GL.buffers[t]=null,t==GL.currArrayBuffer&&(GL.currArrayBuffer=0),t==GL.currElementArrayBuffer&&(GL.currElementArrayBuffer=0))}}";
     const deleteBuffersFixed = "function _glDeleteBuffers(e,i){\n  for(var n=0;n<e;n++){\n    var t=HEAP32[i+4*n>>2],r=GL.buffers[t];\n    if(!r)continue;\n    GLctx.deleteBuffer(r);\n    var mapped=GL.mappedBuffers[t];\n    if(mapped){\n      _free(mapped.mem);delete GL.mappedBuffers[t];\n      Module.__hkMemoryFixStats.deletedMappings++;\n      Module.__hkMemoryFixStats.deletedMappingBytes+=mapped.length;\n    }\n    r.name=0;GL.buffers[t]=null;\n    if(t===GL.currArrayBuffer)GL.currArrayBuffer=0;\n    if(t===GL.currElementArrayBuffer)GL.currElementArrayBuffer=0;\n    if(t===GLctx.currentPixelPackBufferBinding)GLctx.currentPixelPackBufferBinding=0;\n    if(t===GLctx.currentPixelUnpackBufferBinding)GLctx.currentPixelUnpackBufferBinding=0;\n  }\n}";
     const unmapBuffer = "function _glUnmapBuffer(e){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glUnmapBuffer\"),0;var i=emscriptenWebGLGetBufferBinding(e),n=GL.mappedBuffers[i];return n?(GL.mappedBuffers[i]=null,16&n.access||(GL.currentContext.supportsWebGL2EntryPoints?GLctx.bufferSubData(e,n.offset,HEAPU8,n.mem,n.length):GLctx.bufferSubData(e,n.offset,HEAPU8.subarray(n.mem,n.mem+n.length))),_free(n.mem),1):(GL.recordError(1282),Module.printError(\"buffer was never mapped in glUnmapBuffer\"),0)}";
-    const unmapBufferFixed = "function _glUnmapBuffer(e){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glUnmapBuffer\"),0;var i=emscriptenWebGLGetBufferBinding(e),n=GL.mappedBuffers[i];return n?(delete GL.mappedBuffers[i],16&n.access||(GL.currentContext.supportsWebGL2EntryPoints?GLctx.bufferSubData(e,n.offset,HEAPU8,n.mem,n.length):GLctx.bufferSubData(e,n.offset,HEAPU8.subarray(n.mem,n.mem+n.length))),_free(n.mem),1):(GL.recordError(1282),Module.printError(\"buffer was never mapped in glUnmapBuffer\"),0)}";
+    const unmapBufferFixed = "function _glUnmapBuffer(e){\n  if(!emscriptenWebGLValidateMapBufferTarget(e)){GL.recordError(1280);err(\"GL_INVALID_ENUM in glUnmapBuffer\");return 0;}\n  var binding=emscriptenWebGLGetBufferBinding(e),mapping=GL.mappedBuffers[binding];\n  if(!mapping){GL.recordError(1282);err(\"buffer was never mapped in glUnmapBuffer\");return 0;}\n  delete GL.mappedBuffers[binding];\n  try{\n    if(!(mapping.access&16)){\n      if(GL.currentContext.supportsWebGL2EntryPoints)GLctx.bufferSubData(e,mapping.offset,HEAPU8,mapping.mem,mapping.length);\n      else GLctx.bufferSubData(e,mapping.offset,HEAPU8.subarray(mapping.mem,mapping.mem+mapping.length));\n    }\n    return 1;\n  }catch(error){Module.__hkMemoryFixStats.uploadMappingsFreedOnError++;throw error;}\n  finally{_free(mapping.mem);}\n}";
+    // r16: reconstructed r15 explicit owner-release fixes; original package was unavailable.
+    const webRequestRelease = "function _JS_WebRequest_Release(e){var i=wr.requestInstances[e];i.onload=null,i.onerror=null,i.ontimeout=null,i.onabort=null,delete i,wr.requestInstances[e]=null}";
+    const webRequestReleaseFixed = "function _JS_WebRequest_Release(e){\n  var request=wr.requestInstances[e];\n  if(!request)return;\n  delete wr.requestInstances[e];\n  // abort() may synchronously dispatch events. Detach native-owner callbacks first.\n  request.onload=request.onerror=request.ontimeout=request.onabort=request.onprogress=null;\n  Module.__hkMemoryFixStats.webRequestsReleased++;\n  request.abort();\n}";
+    const videoDestroy = "function _JS_Video_Destroy(e){videoInstances[e].detached=!0,videoInstances[e]=null}";
+    const videoDestroyFixed = "function _JS_Video_Destroy(e){\n  var video=videoInstances[e];\n  if(!video)return;\n  video.detached=true;\n  videoInstances[e]=null;\n  Module.__hkMemoryFixStats.videoPlayersReleased++;\n  // Source URLs belong to callers. Reset this element without revoking their URLs.\n  try{video.pause();}\n  finally{video.removeAttribute(\"src\");video.load();}\n}";
+    const videoPlay = "function _JS_Video_Play(e){videoInstances[e].play()}";
+    const videoPlayFixed = "function _hkPlayVideo(video){\n  var pending=video.play();\n  if(pending&&typeof pending.catch===\"function\")pending.catch(function(error){\n    // Only our intentional destroyed-player reset is an expected cancellation.\n    if(video.detached&&error&&error.name===\"AbortError\")return;\n    throw error;\n  });\n}\nfunction _JS_Video_Play(e){_hkPlayVideo(videoInstances[e]);}";
+    const videoCreate = "function _JS_Video_Create(e){var i=Pointer_stringify(e),n=document.createElement(\"video\");return n.style.display=\"none\",n.src=i,n.detached=!1,n.muted=!0,n.crossOrigin=\"anonymous\",n.looping=!1,n.addEventListener(\"ended\",(function(e){n.looping&&!n.detached&&n.play()})),videoInstances.push(n)-1}";
+    const videoCreateFixed = "function _JS_Video_Create(e){var i=Pointer_stringify(e),n=document.createElement(\"video\");return n.style.display=\"none\",n.src=i,n.detached=!1,n.muted=!0,n.crossOrigin=\"anonymous\",n.looping=!1,n.addEventListener(\"ended\",(function(e){n.looping&&!n.detached&&_hkPlayVideo(n)})),videoInstances.push(n)-1}";
+    const mapBuffer = "function _glMapBufferRange(e,i,n,t){if(26!=t&&10!=t)return err(\"glMapBufferRange is only supported when access is MAP_WRITE|INVALIDATE_BUFFER\"),0;if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glMapBufferRange\"),0;var r=_malloc(n);return r?(GL.mappedBuffers[emscriptenWebGLGetBufferBinding(e)]={offset:i,length:n,mem:r,access:t},r):0}";
+    const mapBufferFixed = "function _glMapBufferRange(e,i,n,t){\n  if(26!==t&&10!==t){err(\"glMapBufferRange is only supported when access is MAP_WRITE|INVALIDATE_BUFFER\");return 0;}\n  if(!emscriptenWebGLValidateMapBufferTarget(e)){GL.recordError(1280);err(\"GL_INVALID_ENUM in glMapBufferRange\");return 0;}\n  if(i<0||n<0){GL.recordError(1281);err(\"invalid range in glMapBufferRange\");return 0;}\n  if(n===0){GL.recordError(1282);err(\"zero length in glMapBufferRange\");return 0;}\n  var binding=emscriptenWebGLGetBufferBinding(e);\n  if(!binding||GL.mappedBuffers[binding]){\n    GL.recordError(1282);Module.__hkMemoryFixStats.uploadMappingsRejected++;\n    err(\"buffer is unbound or already mapped in glMapBufferRange\");return 0;\n  }\n  var pointer=_malloc(n);\n  if(!pointer)return 0;\n  GL.mappedBuffers[binding]={offset:i,length:n,mem:pointer,access:t};\n  return pointer;\n}";
+    const flushMappedBuffer = "function _glFlushMappedBufferRange(e,i,n){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),void err(\"GL_INVALID_ENUM in glFlushMappedBufferRange\");var t=GL.mappedBuffers[emscriptenWebGLGetBufferBinding(e)];return t?16&t.access?i<0||n<0||i+n>t.length?(GL.recordError(1281),void Module.printError(\"invalid range in glFlushMappedBufferRange\")):void GLctx.bufferSubData(e,t.offset,HEAPU8.subarray(t.mem+i,t.mem+i+n)):(GL.recordError(1282),void Module.printError(\"buffer was not mapped with GL_MAP_FLUSH_EXPLICIT_BIT in glFlushMappedBufferRange\")):(GL.recordError(1282),void Module.printError(\"buffer was never mapped in glFlushMappedBufferRange\"))}";
+    const flushMappedBufferFixed = "function _glFlushMappedBufferRange(e,i,n){\n  if(!emscriptenWebGLValidateMapBufferTarget(e)){GL.recordError(1280);err(\"GL_INVALID_ENUM in glFlushMappedBufferRange\");return;}\n  var mapping=GL.mappedBuffers[emscriptenWebGLGetBufferBinding(e)];\n  if(!mapping){GL.recordError(1282);err(\"buffer was never mapped in glFlushMappedBufferRange\");return;}\n  if(!(mapping.access&16)){GL.recordError(1282);err(\"buffer was not mapped with GL_MAP_FLUSH_EXPLICIT_BIT in glFlushMappedBufferRange\");return;}\n  if(i<0||n<0||i>mapping.length||n>mapping.length-i){GL.recordError(1281);err(\"invalid range in glFlushMappedBufferRange\");return;}\n  // WebGL2 interprets a zero source length as the remainder of the view.\n  // A native zero-length flush must upload nothing.\n  if(n===0)return;\n  if(GL.currentContext.supportsWebGL2EntryPoints)GLctx.bufferSubData(e,mapping.offset+i,HEAPU8,mapping.mem+i,n);\n  else GLctx.bufferSubData(e,mapping.offset+i,HEAPU8.subarray(mapping.mem+i,mapping.mem+i+n));\n}";
     const msync = 'doMsync:function(e,i,n,t){var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}';
     // r13: release no-longer-valid program locations without recycling IDs.
     const uniformTable = "uniforms:[],shaders:[]";
@@ -1155,12 +1168,12 @@
   "contextDelete": "deleteContext:function(e){\n  if(!e)return;\n  var context=GL.contexts[e];\n  if(context.__hkDeletedUniforms){\n    GL.releaseProgramUniforms(context.__hkDeletedUniforms.info);\n    delete context.__hkDeletedUniforms;\n  }\n  if(GL.currentContext===context)GL.currentContext=null;\n  if(typeof JSEvents===\"object\")JSEvents.removeAllHandlersOnTarget(context.GLctx.canvas);\n  if(context.GLctx.canvas)context.GLctx.canvas.GLctxObject=void 0;\n  _free(e);GL.contexts[e]=null;\n}",
   "unmapCleanup": "delete SYSCALLS.mappings[n],r.allocated&&_free(r.malloc)"
 };
-    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer, uniformTable, uniformPopulate, programDelete, programLink, programUse, contextDelete, unmapCleanup, objectId]) {
+    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer, uniformTable, uniformPopulate, programDelete, programLink, programUse, contextDelete, unmapCleanup, objectId, webRequestRelease, videoDestroy, videoPlay, videoCreate, mapBuffer, flushMappedBuffer]) {
       if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
         throw new Error('Unexpected Unity framework layout; runtime patches were not applied.');
       }
     }
-    const bridge = '\nModule.__hkMemoryFixStats={deletedMappings:0,deletedMappingBytes:0,uniformLocationsReleased:0,unmapCopiesAvoided:0,unmapCopyBytesAvoided:0};Module.__hkRuntime = {' +
+    const bridge = '\nModule.__hkMemoryFixStats={deletedMappings:0,deletedMappingBytes:0,uniformLocationsReleased:0,unmapCopiesAvoided:0,unmapCopyBytesAvoided:0,webRequestsReleased:0,videoPlayersReleased:0,uploadMappingsRejected:0,uploadMappingsFreedOnError:0};Module.__hkRuntime = {' +
       'version:"' + VERSION + '",' +
       'get loop(){return Browser.mainLoop;},' +
       'get audio(){return WEBAudio.audioWebEnabled ? WEBAudio.audioContext : null;},' +
@@ -1187,6 +1200,12 @@
     // No backing file and private/immutable maps cannot need write-back.
     // Keep the original snapshot for ordinary shared writable mappings.
     let patched = source
+      .replace(webRequestRelease,webRequestReleaseFixed)
+      .replace(videoDestroy,videoDestroyFixed)
+      .replace(videoPlay,videoPlayFixed)
+      .replace(videoCreate,videoCreateFixed)
+      .replace(mapBuffer,mapBufferFixed)
+      .replace(flushMappedBuffer,flushMappedBufferFixed)
       .replace(uniformTable, registryReplacements.uniformTable)
       .replace(uniformPopulate, registryReplacements.uniformPopulate)
       .replace(programDelete, registryReplacements.programDelete)
@@ -1235,6 +1254,18 @@
     // added graphics queries, or changes to the actual native delete calls.
     patched = patched.replace(/GL\.(buffers|programs|framebuffers|renderbuffers|shaders|vaos|textures|queries|samplers|transformFeedbacks|syncs|programInfos)\[([^\]]+)\]=null/g,
       'delete GL.$1[$2]');
+    // r16: retain only owned audio handles; reject late decoded ownership.
+    const audioMemoryReplacements = [["var WEBAudio={audioInstances:[],audioContext:{},audioWebEnabled:0};", "var WEBAudio={audioInstances:Object.create(null),nextAudioId:0,audioContext:{},audioWebEnabled:0,pendingDecodes:0,pendingEncodedBytes:0,discardedDecodedResults:0,addAudioInstance:function(value){var id=this.nextAudioId++;this.audioInstances[id]=value;return id;}};\n// A requested snapshot only: no polling, getChannelData(), or retained buffers.\n// Includes a playing source after its clip handle is released, once per buffer.\nModule.__hkAudioMemorySnapshot=function(){\n  var seen=new WeakSet(),handles=0,clips=0,channels=0,buffers=0,bytes=0;\n  function count(buffer){\n    if(!buffer||seen.has(buffer))return;\n    seen.add(buffer);buffers++;\n    bytes+=buffer.length*buffer.numberOfChannels*4;\n  }\n  for(var id in WEBAudio.audioInstances){\n    var value=WEBAudio.audioInstances[id];\n    if(!value||value.__hkReleased)continue;\n    handles++;\n    if(value.source){channels++;count(value.source.buffer);}\n    else{clips++;count(value.buffer);}\n  }\n  return {scope:\"JS-owned AudioBuffer PCM payload; excludes decoder and driver copies\",liveHandles:handles,clipHandles:clips,channelHandles:channels,uniqueDecodedBuffers:buffers,decodedPCMBytes:bytes,pendingDecodes:WEBAudio.pendingDecodes,pendingEncodedAudioBytes:WEBAudio.pendingEncodedBytes,discardedDecodeResults:WEBAudio.discardedDecodedResults,nextAudioHandle:WEBAudio.nextAudioId};\n};"], ["function _JS_Sound_Load(e,i){if(0==WEBAudio.audioWebEnabled)return 0;var n={buffer:null,error:!1},t=WEBAudio.audioInstances.push(n)-1,r=HEAPU8.buffer.slice(e,e+i);return WEBAudio.audioContext.decodeAudioData(r,(function(e){n.buffer=e}),(function(){n.error=!0,console.log(\"Decode error.\")})),t}", "function _JS_Sound_Load(e,i){\n  if(0==WEBAudio.audioWebEnabled)return 0;\n  // decodeAudioData detaches its input. This copy must not alias the WASM heap.\n  var data=HEAPU8.buffer.slice(e,e+i),owner={buffer:null,error:false};\n  var id=WEBAudio.addAudioInstance(owner),settled=false;\n  WEBAudio.pendingDecodes++;WEBAudio.pendingEncodedBytes+=i;\n  function finish(){\n    if(settled)return null;\n    settled=true;WEBAudio.pendingDecodes--;WEBAudio.pendingEncodedBytes-=i;\n    var value=owner;owner=null;\n    return value;\n  }\n  function success(buffer){\n    if(settled)return;\n    var value=finish();\n    if(value&&!value.__hkReleased&&WEBAudio.audioInstances[id]===value)value.buffer=buffer;\n    else WEBAudio.discardedDecodedResults++;\n  }\n  function failure(){\n    if(settled)return;\n    var value=finish();\n    if(value&&!value.__hkReleased&&WEBAudio.audioInstances[id]===value){\n      value.error=true;console.log(\"Decode error.\");\n    }\n  }\n  try{\n    var task=WEBAudio.audioContext.decodeAudioData(data,success,failure);\n    data=null;\n    // Modern implementations also reject a Promise when invoking failure.\n    // Account/report once through the existing native error-state contract.\n    if(task&&typeof task.catch===\"function\")task.catch(failure);\n  }catch(error){\n    finish();delete WEBAudio.audioInstances[id];throw error;\n  }\n  return id;\n}"], ["WEBAudio.audioInstances.push(n)-1", "WEBAudio.addAudioInstance(n)"], ["WEBAudio.audioInstances.push(r)-1", "WEBAudio.addAudioInstance(r)"], ["var n=WEBAudio.audioInstances[e];WEBAudio.audioInstances[e]=null;", "var n=WEBAudio.audioInstances[e];delete WEBAudio.audioInstances[e];"]];
+    for (const [before, after] of audioMemoryReplacements) {
+      if (patched.indexOf(before) < 0 || patched.indexOf(before) !== patched.lastIndexOf(before)) {
+        throw new Error('Unexpected Unity audio ownership layout; runtime patches were not applied.');
+      }
+      patched = patched.replace(before, after);
+    }
+    // This table was private to generated glue. Refuse added array consumers.
+    if (/WEBAudio\.audioInstances\s*\./.test(patched)) {
+      throw new Error('Unexpected Unity audio table consumer; runtime patches were not applied.');
+    }
     return patched;
   };
 
