@@ -67,13 +67,13 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.10.04-r14</div>
+    <div id="build-version">Version: HK-WebGL 2026.11.20-r16</div>
     <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.10.04-r14';
-    const BUILD_TOKEN = '2026.10.04-r14';
+    const BUILD_VERSION = 'HK-WebGL 2026.11.20-r16';
+    const BUILD_TOKEN = '2026.11.20-r16';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
     const DATA_FALLBACK_BASE =
@@ -83,6 +83,7 @@
     const DATA_TOTAL_SIZE = 869012889;
     const DATA_PART_COUNT = Math.ceil(DATA_TOTAL_SIZE / DATA_PART_SIZE); // 208
     const STARTUP_RETRY_DELAYS = [0, 600, 1400, 2800];
+    const WASM_PART_SIZES = [20866662, 12270092];
 
     const buildBase = 'build/';
     const dataBase = buildBase + 'data4m/';
@@ -337,29 +338,255 @@
       throw lastError || new Error('Could not load ' + url);
     }
 
-    async function joinParts(urls, type, label) {
-      const blobs = [];
+    // Compile the unchanged two-part WASM before Unity allocates its heap.
+    // The normal path feeds one backpressured network chunk at a time into the
+    // browser compiler. It never constructs a complete WASM Blob/ArrayBuffer.
+    async function compileRuntime(urls, sizes, signal = null) {
+      if (urls.length !== sizes.length || sizes.some(size => !Number.isSafeInteger(size) || size <= 0)) {
+        throw new Error('Invalid runtime part geometry');
+      }
+      const total = sizes.reduce((sum, size) => sum + size, 0);
+      if (!Number.isSafeInteger(total) || !total) throw new Error('Invalid runtime binary size');
+      const stats = window.__hkWasmStartupStats = {
+        phase: 'compiling', mode: '', expectedBytes: total,
+        compileAttempts: 0, bodyRestarts: 0, headerRetries: 0,
+        networkBytes: 0, maxChunkBytes: 0,
+        assemblyBytes: 0, partArrayBufferBytes: 0,
+        wrapperRetainedSourceBytes: 0, lastError: ''
+      };
+      let streamSupported = typeof WebAssembly.compileStreaming === 'function' &&
+        typeof ReadableStream === 'function' && typeof Response === 'function';
 
-      for (let index = 0; index < urls.length; index += 1) {
-        message.textContent =
-          'Loading ' + label + ' ' + (index + 1) + ' of ' + urls.length + '…';
-
-        const response = await fetchWithRetry(
-          urls[index],
-          { cache: 'force-cache' },
-          label + ' ' + (index + 1) + '/' + urls.length
-        );
-        if (!response.ok) {
-          throw new Error(
-            'Could not load ' + urls[index] + ' (' + response.status + ')'
-          );
+      function session(reload) {
+        let part = 0, partBytes = 0, reader = null, request = null;
+        let timer = null, stopped = false;
+        const state = { error: null, stage: '', unsupported: false };
+        const abort = () => { stopped = true; if (request) request.abort(); };
+        if (signal) signal.addEventListener('abort', abort, { once: true });
+        async function bounded(action) {
+          timer = setTimeout(() => { if (request) request.abort(); }, 30000);
+          try { return await action(); }
+          finally { clearTimeout(timer); timer = null; }
         }
-        blobs.push(await response.blob());
+        async function close() {
+          stopped = true;
+          if (signal) signal.removeEventListener('abort', abort);
+          clearTimeout(timer); timer = null;
+          if (request) request.abort();
+          if (reader) {
+            try { await reader.cancel(); } catch (_) {}
+            try { reader.releaseLock(); } catch (_) {}
+          }
+          reader = request = null;
+        }
+        async function open() {
+          message.textContent = 'Loading runtime ' + (part + 1) + ' of ' + urls.length + '…';
+          for (let attempt = 0; attempt < STARTUP_RETRY_DELAYS.length; attempt += 1) {
+            if (stopped || (signal && signal.aborted)) throw new Error('Runtime download cancelled');
+            if (attempt) {
+              stats.headerRetries += 1;
+              setRetryStatus('Connection interrupted — retrying runtime ' + (part + 1) +
+                ' (' + (attempt + 1) + '/' + STARTUP_RETRY_DELAYS.length + ')…');
+              await wait(STARTUP_RETRY_DELAYS[attempt]);
+              if (stopped || (signal && signal.aborted)) throw new Error('Runtime download cancelled');
+            }
+            request = new AbortController();
+            let response;
+            try {
+              response = await bounded(() => nativeFetch(urls[part], {
+                cache: reload || attempt ? 'reload' : 'force-cache',
+                credentials: 'same-origin', signal: request.signal
+              }));
+              if (!response.ok) throw new Error('Runtime part ' + (part + 1) + ': HTTP ' + response.status);
+              // Transfer length is checked from decoded bytes, not HTTP headers
+              // (Content-Length may describe a compressed transport encoding).
+              return response;
+            } catch (error) {
+              request.abort();
+              if (response && response.body) {
+                try { await response.body.cancel(); } catch (_) {}
+              }
+              if (stopped || (signal && signal.aborted) ||
+                  attempt + 1 === STARTUP_RETRY_DELAYS.length) throw error;
+            }
+          }
+        }
+        async function next(allowPartBuffer) {
+          try {
+            while (part < urls.length) {
+              if (stopped || (signal && signal.aborted)) throw new Error('Runtime download cancelled');
+              if (!reader) {
+                state.stage = 'headers';
+                const response = await open();
+                state.stage = 'body';
+                if (!response.body || typeof response.body.getReader !== 'function') {
+                  if (!allowPartBuffer) {
+                    state.unsupported = true;
+                    throw new Error('Runtime response streaming is unavailable');
+                  }
+                  const bytes = new Uint8Array(await bounded(() => response.arrayBuffer()));
+                  if (bytes.length !== sizes[part]) throw new Error('Incorrect runtime part length');
+                  stats.partArrayBufferBytes = Math.max(stats.partArrayBufferBytes, bytes.byteLength);
+                  stats.networkBytes += bytes.length;
+                  part += 1;
+                  request = null;
+                  return { done: false, value: bytes };
+                }
+                reader = response.body.getReader();
+                partBytes = 0;
+              }
+              const item = await bounded(() => reader.read());
+              if (item.done) {
+                if (partBytes !== sizes[part]) throw new Error('Incorrect runtime part length');
+                reader.releaseLock(); reader = request = null;
+                part += 1;
+                continue;
+              }
+              partBytes += item.value.byteLength;
+              if (partBytes > sizes[part]) throw new Error('Oversized runtime part');
+              stats.networkBytes += item.value.byteLength;
+              stats.maxChunkBytes = Math.max(stats.maxChunkBytes, item.value.byteLength);
+              return item;
+            }
+            state.stage = '';
+            return { done: true };
+          } catch (error) { state.error = error; throw error; }
+        }
+        return { next, close, state };
       }
 
-      const objectUrl = URL.createObjectURL(new Blob(blobs, { type }));
-      blobs.length = 0;
-      return objectUrl;
+      // An already-consumed partial module cannot be rewound. A body failure
+      // cancels that compiler input and restarts from part 1 with fresh requests.
+      for (let attempt = 0; attempt < STARTUP_RETRY_DELAYS.length; attempt += 1) {
+        if (signal && signal.aborted) { stats.phase = 'cancelled'; throw new Error('Runtime download cancelled'); }
+        if (attempt) {
+          stats.bodyRestarts += 1;
+          setRetryStatus('Runtime download interrupted — restarting (' +
+            (attempt + 1) + '/' + STARTUP_RETRY_DELAYS.length + ')…');
+          await wait(STARTUP_RETRY_DELAYS[attempt]);
+        }
+        const source = session(attempt > 0);
+        let assembly = null;
+        try {
+          stats.compileAttempts += 1;
+          let compiled;
+          if (streamSupported) {
+            stats.mode = 'stream';
+            const body = new ReadableStream({
+              async pull(controller) {
+                try {
+                  const item = await source.next(false);
+                  if (item.done) controller.close(); else controller.enqueue(item.value);
+                } catch (error) { controller.error(error); }
+              },
+              cancel() { return source.close(); }
+            }, { highWaterMark: 0 });
+            compiled = await WebAssembly.compileStreaming(new Response(body, {
+              headers: { 'Content-Type': 'application/wasm' }
+            }));
+          } else {
+            stats.mode = 'single-buffer-fallback';
+            assembly = new Uint8Array(total);
+            stats.assemblyBytes = total;
+            stats.wrapperRetainedSourceBytes = total;
+            let offset = 0;
+            while (true) {
+              const item = await source.next(true);
+              if (item.done) break;
+              assembly.set(item.value, offset); offset += item.value.byteLength;
+            }
+            if (offset !== total) throw new Error('Incorrect runtime binary length');
+            compiled = await WebAssembly.compile(assembly);
+          }
+          if (signal && signal.aborted) throw new Error('Runtime download cancelled');
+          stats.phase = 'compiled';
+          stats.lastError = '';
+          setRetryStatus('');
+          return compiled;
+        } catch (error) {
+          stats.lastError = error && error.message ? error.message : String(error);
+          if (signal && signal.aborted) { stats.phase = 'cancelled'; throw error; }
+          // Some older engines expose compileStreaming but reject synthetic
+          // Response streams. A single-buffer compile is a bounded fallback.
+          if (streamSupported && (source.state.unsupported ||
+              (!source.state.error && error instanceof TypeError))) {
+            streamSupported = false;
+            attempt -= 1;
+            continue;
+          }
+          if (!source.state.error || source.state.stage !== 'body' ||
+              attempt + 1 === STARTUP_RETRY_DELAYS.length) {
+            stats.phase = 'failed';
+            throw error;
+          }
+        } finally {
+          assembly = null;
+          stats.wrapperRetainedSourceBytes = 0;
+          await source.close();
+        }
+      }
+      throw new Error('Runtime download failed');
+    }
+
+    function createWasmInstantiation(compiled) {
+      let disposed = false, pending = null;
+      function fail(owner, error, cancelled) {
+        window.__hkWasmStartupStats.phase = cancelled ? 'cancelled' : 'failed';
+        window.__hkWasmStartupStats.lastError = String(error && error.message || error);
+        if (owner && owner.startupErrorHandler) owner.startupErrorHandler(error);
+        else if (!cancelled && owner && owner.abortHandler) owner.abortHandler(String(error));
+        else if (!cancelled) console.error(error);
+      }
+      function cancelOwner(owner) {
+        fail(owner, new Error('The Hollow Knight session has already ended.'), true);
+      }
+      return {
+        instantiate: function (imports, receiveInstance) {
+          if (disposed) { cancelOwner(this); return {}; }
+          if (!compiled) throw new Error('Runtime module was already consumed');
+          // Only this small holder is captured by the native instantiation
+          // promise. Retirement clears its engine and callback references.
+          const holder = pending = { owner: this, receive: receiveInstance };
+          let task;
+          try { task = WebAssembly.instantiate(compiled, imports); }
+          catch (error) {
+            const owner = holder.owner;
+            pending = null; holder.owner = holder.receive = null;
+            fail(owner, error, false);
+            return {};
+          } finally { compiled = null; }
+          Promise.resolve(task).then(instance => {
+            if (disposed || pending !== holder) return;
+            const owner = holder.owner, receive = holder.receive;
+            pending = null; holder.owner = holder.receive = null;
+            window.__hkWasmStartupStats.phase = 'instantiated';
+            try { receive(instance); }
+            catch (error) { fail(owner, error, false); }
+          }, error => {
+            if (disposed || pending !== holder) return;
+            const owner = holder.owner;
+            pending = null; holder.owner = holder.receive = null;
+            fail(owner, error, false);
+          });
+          // This legacy Emscripten hook expects an immediate empty export
+          // object; its receiveInstance callback resolves wasm-instantiate.
+          return {};
+        },
+        dispose: function () {
+          if (disposed) return;
+          disposed = true;
+          const wasUnconsumed = Boolean(compiled);
+          compiled = null;
+          if (pending) {
+            const owner = pending.owner;
+            pending.owner = pending.receive = null;
+            pending = null;
+            cancelOwner(owner);
+          } else if (wasUnconsumed) {
+            window.__hkWasmStartupStats.phase = 'cancelled';
+          }
+        }
+      };
     }
 
     function reportDataReadError(detail) {
@@ -386,14 +613,16 @@
       }
     }
 
-    let codeUrl = null;
+    let wasmStartup = null;
+    let startupAbort = null;
     let frameworkObjectUrl = null;
     let lifecycle = null;
 
     function revokeRuntimeUrl() {
-      if (codeUrl) {
-        URL.revokeObjectURL(codeUrl);
-        codeUrl = null;
+      if (startupAbort) { startupAbort.abort(); startupAbort = null; }
+      if (wasmStartup) {
+        wasmStartup.dispose();
+        wasmStartup = null;
       }
 
       if (frameworkObjectUrl) {
@@ -494,12 +723,22 @@
         }
 
         lifecycle = installHollowKnightLifecycle(canvas);
+        startupAbort = new AbortController();
+        const cleanupLifecycle = lifecycle.cleanup;
+        lifecycle.cleanup = function () {
+          revokeRuntimeUrl();
+          cleanupLifecycle();
+        };
         document.addEventListener('hk-game-resumed', installNeighborPreload);
 
         await loadScript(
           buildBase + 'hk.loader.js' + versionQuery,
           'loader'
         );
+
+        if (window.__hkLoaderVersion !== BUILD_TOKEN) {
+          throw new Error('Loader update is still cached. Purge the loader CDN URL and reopen the game.');
+        }
 
         let neighborPreloadReady = false;
         try {
@@ -515,15 +754,16 @@
           reportPreloadError(error);
         }
 
-        codeUrl = await joinParts(
-          numberedUrls(buildBase, 'hk.wasm', 2),
-          'application/wasm',
-          'runtime'
-        );
+        wasmStartup = createWasmInstantiation(await compileRuntime(
+          numberedUrls(buildBase, 'hk.wasm', WASM_PART_SIZES.length),
+          WASM_PART_SIZES,
+          startupAbort.signal
+        ));
 
         message.textContent = 'Loading framework…';
 
         const frameworkUrl = await prepareFrameworkUrl();
+        if (lifecycle.state.phase === 'disposed') throw new Error('The Hollow Knight session has already ended.');
 
         message.textContent = 'Starting game…';
 
@@ -537,7 +777,9 @@
             ? 16 * 1024 * 1024 : 0,
           devicePixelRatio: 0.8,
           frameworkUrl,
-          codeUrl,
+          // Compilation has completed; the generated runtime uses this hook
+          // and never requests an assembled codeUrl or stores wasmBinary.
+          instantiateWasm: wasmStartup.instantiate,
           dataPartUrls: numberedUrls(dataBase, 'hk.data', DATA_PART_COUNT),
           mountDataParts: async (module, urls) => {
             lifecycle.bind(module);
@@ -601,6 +843,7 @@
         }
 
         revokeRuntimeUrl();
+        if (lifecycle && lifecycle.state.phase === 'disposed') return;
         console.error(error);
         setRetryStatus('');
 
