@@ -58,6 +58,18 @@
       font-size: 11px;
       opacity: 0.58;
     }
+
+    #memory-button, #memory-panel { position: fixed; z-index: 20; right: 12px; bottom: 12px; color: #eee; font: 13px/1.45 system-ui, sans-serif; }
+    #memory-button { background: #20202bea; border: 1px solid #555; border-radius: 5px; padding: 6px 10px; cursor: pointer; }
+    #memory-panel { bottom: 52px; max-width: min(340px, calc(100vw - 48px)); max-height: calc(100vh - 96px); overflow: auto; background: #181820f5; border: 1px solid #555; border-radius: 8px; padding: 16px; text-align: left; font-weight: 400; }
+    #memory-panel[hidden] { display: none; }
+    #memory-panel h2 { font-size: 15px; margin: 0 0 12px; }
+    #memory-panel p { margin: 10px 0; }
+    #memory-panel select, #memory-panel button { color: #eee; background: #30303c; border: 1px solid #666; border-radius: 4px; padding: 6px 8px; font: inherit; }
+    #memory-panel select { display: block; margin-top: 5px; width: 100%; }
+    #memory-panel button { margin-right: 6px; cursor: pointer; }
+    #memory-stats { white-space: pre-line; font: 12px/1.5 system-ui, sans-serif; }
+    #memory-mode-status { color: #c8c8d8; }
   </style>
 </head>
 <body>
@@ -67,13 +79,29 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.11.20-r16</div>
+    <div id="build-version">Version: HK-WebGL 2026.11.20-r17</div>
     <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
+  <button type="button" id="memory-button" aria-controls="memory-panel">Memory</button>
+  <section id="memory-panel" aria-label="Audio quality and memory" hidden>
+    <h2>Audio quality and memory</h2>
+    <label for="audio-memory-mode">Audio quality</label>
+    <select id="audio-memory-mode">
+      <option value="0">Original</option>
+      <option value="32000" selected>Balanced — less audio memory</option>
+      <option value="24000">Lower memory — softer high frequencies</option>
+    </select>
+    <p>Balanced keeps stereo and playback timing, with less very high-frequency detail. Lower memory makes a larger sound-quality tradeoff. Original keeps the previous audio quality.</p>
+    <p id="memory-mode-status">Selected for this launch.</p>
+    <p id="memory-stats">Open after startup to view current readings.</p>
+    <button type="button" id="memory-refresh">Refresh readings</button>
+    <button type="button" id="memory-close">Close</button>
+  </section>
+
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.11.20-r16';
-    const BUILD_TOKEN = '2026.11.20-r16';
+    const BUILD_VERSION = 'HK-WebGL 2026.11.20-r17';
+    const BUILD_TOKEN = '2026.11.20-r17';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
     const DATA_FALLBACK_BASE =
@@ -96,6 +124,118 @@
     const retryStatus = document.getElementById('retry-status');
 
     window.__hkBuildVersion = BUILD_VERSION;
+
+    // On-demand controls and scalar accounting. No recurring sampling timer.
+    function installAudioMemoryPanel() {
+      const STORAGE_KEY = 'hk.audioMemoryMode';
+      const allowed = [0, 32000, 24000];
+      let selected = 32000, launchRate = null, disposed = false;
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (['0', '32000', '24000'].includes(stored)) selected = Number(stored);
+      } catch (_) { /* Embedded browsers may deny preference storage. */ }
+      const button = document.getElementById('memory-button');
+      const panel = document.getElementById('memory-panel');
+      const select = document.getElementById('audio-memory-mode');
+      const status = document.getElementById('memory-mode-status');
+      const stats = document.getElementById('memory-stats');
+      const refreshButton = document.getElementById('memory-refresh');
+      const closeButton = document.getElementById('memory-close');
+      select.value = String(selected);
+      function mib(value) { return (value / 1048576).toFixed(1) + ' MiB'; }
+      function refresh() {
+        if (disposed) return;
+        const instance = window.__hkUnityInstance;
+        const module = instance && instance.Module;
+        if (!module) { stats.textContent = 'Memory readings become available after the game starts.'; return; }
+        const snapshot = module.__hkAudioMemorySnapshot ? module.__hkAudioMemorySnapshot() : null;
+        const lines = [];
+        if (snapshot) {
+          lines.push('Decoded audio: ' + mib(snapshot.decodedPCMBytes));
+          lines.push('Audio covered by this setting: ' + mib(snapshot.decodedCompressedPCMBytes || 0));
+          if (Number.isFinite(snapshot.estimatedCompressedPCMSavingsAtPlaybackRate)) {
+            lines.push('Estimated audio-buffer reduction: ' + mib(snapshot.estimatedCompressedPCMSavingsAtPlaybackRate) + ' versus original rate');
+          }
+          if (snapshot.importedPCMBytes) lines.push('Other PCM audio: ' + mib(snapshot.importedPCMBytes));
+          if (snapshot.decodeSampleRate) lines.push('Active audio quality: ' +
+            (snapshot.decodeSampleRate === snapshot.playbackSampleRate ? 'Original' :
+              snapshot.decodeSampleRate === 32000 ? 'Balanced' :
+              snapshot.decodeSampleRate === 24000 ? 'Lower memory' : 'Custom') +
+            ' (' + (snapshot.decodeSampleRate / 1000) + ' kHz)');
+          if (snapshot.decodeFallbackReason) lines.push('Compatibility: ' + snapshot.decodeFallbackReason);
+          lines.push('Audio loading: ' + snapshot.activeDecodes + ' active, ' + snapshot.queuedDecodes + ' waiting');
+          if (snapshot.queuedEncodedAudioBytes) lines.push('Waiting compressed audio: ' + mib(snapshot.queuedEncodedAudioBytes));
+        }
+        if (module.HEAPU8) lines.push('Game heap capacity: ' + mib(module.HEAPU8.byteLength));
+        const cache = window.__hkLazyStats;
+        if (cache && Number.isFinite(cache.cacheBytes)) lines.push('Source cache: ' + mib(cache.cacheBytes));
+        if (module.__hkMmapMemorySnapshot) {
+          const mappings = module.__hkMmapMemorySnapshot();
+          if (Number.isFinite(mappings.uniqueOwnedMappedPayloadBytes)) lines.push('Mapped allocations inside heap: ' + mib(mappings.uniqueOwnedMappedPayloadBytes));
+        }
+        // Query the existing game context only. No probe canvas or extra context.
+        if (module.ctx && typeof module.ctx.getSupportedExtensions === 'function') {
+          try {
+            const extensions = module.ctx.getSupportedExtensions();
+            if (extensions) {
+              const dxt = extensions.some(name => /^(WEBKIT_|MOZ_)?WEBGL_compressed_texture_s3tc$/.test(name));
+              const astc = extensions.includes('WEBGL_compressed_texture_astc');
+              lines.push('Texture support: DXT5 ' + (dxt ? 'yes' : 'no') + ', ASTC ' + (astc ? 'yes' : 'no'));
+            }
+          } catch (_) { lines.push('Texture support could not be read.'); }
+        }
+        lines.push('These readings are not total device memory. Heap capacity includes reusable space; graphics and browser decoder memory are not included.');
+        stats.textContent = lines.join('\n');
+      }
+      function show(event) {
+        if (event) event.stopPropagation();
+        if (disposed) return;
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) refresh();
+      }
+      function close(event) {
+        if (event) event.stopPropagation();
+        panel.hidden = true;
+        canvas.focus();
+      }
+      function changed() {
+        const rate = Number(select.value);
+        if (!allowed.includes(rate)) { select.value = String(selected); return; }
+        selected = rate;
+        let saved = true;
+        try { localStorage.setItem(STORAGE_KEY, String(selected)); } catch (_) { saved = false; }
+        status.textContent = launchRate === null ? 'Selected for this launch.' :
+          selected === launchRate ? 'This is the current launch setting.' :
+          saved ? 'Saved. Applies next time you open the game.' :
+          'This browser could not save the setting. Choose it during loading on the next launch.';
+      }
+      function stopInput(event) { event.stopPropagation(); }
+      button.addEventListener('click', show);
+      closeButton.addEventListener('click', close);
+      refreshButton.addEventListener('click', refresh);
+      select.addEventListener('change', changed);
+      for (const type of ['keydown', 'keyup', 'pointerdown', 'pointerup', 'click']) panel.addEventListener(type, stopInput);
+      return {
+        forLaunch() {
+          if (launchRate === null) {
+            launchRate = selected;
+            status.textContent = 'Quality changes apply when the game is opened again.';
+          }
+          return launchRate;
+        },
+        cleanup() {
+          if (disposed) return;
+          disposed = true;
+          button.removeEventListener('click', show);
+          closeButton.removeEventListener('click', close);
+          refreshButton.removeEventListener('click', refresh);
+          select.removeEventListener('change', changed);
+          for (const type of ['keydown', 'keyup', 'pointerdown', 'pointerup', 'click']) panel.removeEventListener(type, stopInput);
+          button.remove(); panel.remove();
+        }
+      };
+    }
+    const audioMemoryPanel = installAudioMemoryPanel();
 
     const nativeFetch = window.fetch.bind(window);
 
@@ -727,6 +867,7 @@
         const cleanupLifecycle = lifecycle.cleanup;
         lifecycle.cleanup = function () {
           revokeRuntimeUrl();
+          audioMemoryPanel.cleanup();
           cleanupLifecycle();
         };
         document.addEventListener('hk-game-resumed', installNeighborPreload);
@@ -769,6 +910,7 @@
 
         const unityConfig = {
           __hkLifecycle: lifecycle,
+          __hkAudioDecodeSampleRate: audioMemoryPanel.forLaunch(),
           preMainLoop: () => lifecycle.beforeFrame(),
           errorHandler: error => lifecycle.runtimeError(error),
           // Keep desktop growth unchanged. iPadOS can present a Mac user agent.
