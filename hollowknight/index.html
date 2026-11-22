@@ -88,7 +88,7 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.11.20-r17-ui1</div>
+    <div id="build-version">Version: HK-WebGL 2026.11.21-r17-mono1</div>
     <div id="build-profile">4 MiB chunks · 60 MiB LazyFS · DPR 0.8 · preload ×1</div>
   </div>
 
@@ -96,22 +96,23 @@
   <section id="memory-panel" aria-label="Audio quality and memory" data-launch="true">
     <h2>Audio quality and memory</h2>
     <label for="audio-memory-mode">Audio quality</label>
-    <select id="audio-memory-mode" size="3">
-      <option value="0">Original</option>
-      <option value="32000" selected>Balanced — less audio memory</option>
-      <option value="24000">Lower memory — softer high frequencies</option>
+    <select id="audio-memory-mode" size="4">
+      <option value="24000-mono" selected>Minimum memory — mono, 24 kHz</option>
+      <option value="24000">Lower memory — stereo, 24 kHz</option>
+      <option value="32000">Balanced — stereo, 32 kHz</option>
+      <option value="0">Original — stereo</option>
     </select>
-    <p>Balanced keeps stereo and playback timing, with less very high-frequency detail. Lower memory makes a larger sound-quality tradeoff. Original keeps the previous audio quality.</p>
+    <p>Minimum memory combines stereo recordings into mono to reduce audio memory further. Playback speed and the game’s positional audio controls are preserved. Choose Lower memory or Balanced to keep the recordings’ stereo width. The 24 kHz options have softer high frequencies; Original keeps the previous audio quality.</p>
     <p id="memory-mode-status">Choose audio quality, then press Start game.</p>
     <button type="button" id="memory-start">Start game</button>
     <p id="memory-stats" hidden>Open after startup to view current readings.</p>
     <button type="button" id="memory-refresh" hidden>Refresh readings</button>
     <button type="button" id="memory-close" hidden>Close</button>
-    <p class="launch-version">HK-WebGL 2026.11.20-r17-ui1</p>
+    <p class="launch-version">HK-WebGL 2026.11.21-r17-mono1</p>
   </section>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.11.20-r17-ui1';
+    const BUILD_VERSION = 'HK-WebGL 2026.11.21-r17-mono1';
     const BUILD_TOKEN = '2026.11.20-r17';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
@@ -141,13 +142,13 @@
     // Explicit launch choice and on-demand readings. No automatic start timer.
     function installAudioMemoryPanel() {
       const STORAGE_KEY = 'hk.audioMemoryMode';
-      const allowed = [0, 32000, 24000];
-      let selected = 32000, launchRate = null, disposed = false, accepted = false;
+      const allowed = ['0', '32000', '24000', '24000-mono'];
+      let selected = '24000-mono', launchMode = null, launchRate = null, launchMono = false, disposed = false, accepted = false;
       let settleStart;
       const startPromise = new Promise(resolve => { settleStart = resolve; });
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        if (['0', '32000', '24000'].includes(stored)) selected = Number(stored);
+        if (allowed.includes(stored)) selected = stored;
       } catch (_) { /* Embedded browsers may deny preference storage. */ }
       const button = document.getElementById('memory-button');
       const panel = document.getElementById('memory-panel');
@@ -158,7 +159,7 @@
       const closeButton = document.getElementById('memory-close');
       const startButton = document.getElementById('memory-start');
       select.value = String(selected);
-      select.setAttribute('size', '3');
+      select.setAttribute('size', '4');
       panel.setAttribute('data-launch', 'true');
       panel.hidden = false;
       button.hidden = true;
@@ -176,15 +177,21 @@
           lines.push('Decoded audio: ' + mib(snapshot.decodedPCMBytes));
           lines.push('Audio covered by this setting: ' + mib(snapshot.decodedCompressedPCMBytes || 0));
           if (Number.isFinite(snapshot.estimatedCompressedPCMSavingsAtPlaybackRate)) {
-            lines.push('Estimated audio-buffer reduction: ' + mib(snapshot.estimatedCompressedPCMSavingsAtPlaybackRate) + ' versus original rate');
+            lines.push('Estimated total audio-buffer reduction: ' + mib(snapshot.estimatedCompressedPCMSavingsAtPlaybackRate) + ' versus original quality');
           }
           if (snapshot.importedPCMBytes) lines.push('Other PCM audio: ' + mib(snapshot.importedPCMBytes));
+          if (Number.isFinite(snapshot.monoPCMBytesSaved)) {
+            lines.push('Extra reduction from mono: ' + mib(snapshot.monoPCMBytesSaved) + ' versus stereo at the same rate');
+          }
           if (snapshot.decodeSampleRate) lines.push('Active audio quality: ' +
-            (snapshot.decodeSampleRate === snapshot.playbackSampleRate ? 'Original' :
+            (snapshot.monoEnabled ? 'Minimum memory — mono' :
+              snapshot.decodeSampleRate === snapshot.playbackSampleRate ? 'Original' :
               snapshot.decodeSampleRate === 32000 ? 'Balanced' :
               snapshot.decodeSampleRate === 24000 ? 'Lower memory' : 'Custom') +
             ' (' + (snapshot.decodeSampleRate / 1000) + ' kHz)');
           if (snapshot.decodeFallbackReason) lines.push('Compatibility: ' + snapshot.decodeFallbackReason);
+          if (snapshot.monoEnabled) lines.push('Stereo buffers converted: ' + (snapshot.monoConvertedBuffers || 0) + '; stereo retained: ' + (snapshot.monoRemainingStereoBuffers || 0));
+          if (snapshot.monoFallbackReason) lines.push('Last stereo fallback: ' + snapshot.monoFallbackReason);
           lines.push('Audio loading: ' + snapshot.activeDecodes + ' active, ' + snapshot.queuedDecodes + ' waiting');
           if (snapshot.queuedEncodedAudioBytes) lines.push('Waiting compressed audio: ' + mib(snapshot.queuedEncodedAudioBytes));
         }
@@ -223,27 +230,36 @@
       }
       function changed() {
         if (disposed) return;
-        const rate = Number(select.value);
-        if (!allowed.includes(rate)) { select.value = String(selected); return; }
-        selected = rate;
+        const mode = String(select.value);
+        if (!allowed.includes(mode)) { select.value = selected; return; }
+        selected = mode;
         let saved = true;
         try { localStorage.setItem(STORAGE_KEY, String(selected)); } catch (_) { saved = false; }
         status.textContent = !accepted ? 'Selected for this launch. Press Start game when ready.' :
-          selected === launchRate ? 'This is the current launch setting.' :
+          selected === launchMode ? 'This is the current launch setting.' :
           saved ? 'Saved. Applies next time you open the game.' :
           'This browser could not save the setting. Choose it on the next launch screen.';
       }
       function forLaunch() {
         if (disposed) return null;
-        if (launchRate === null) launchRate = selected;
+        if (launchRate === null) {
+          launchMode = selected;
+          launchMono = selected === '24000-mono';
+          launchRate = launchMono ? 24000 : Number(selected);
+        }
         return launchRate;
+      }
+      function monoForLaunch() {
+        if (disposed) return false;
+        forLaunch();
+        return launchMono;
       }
       function start(event) {
         if (event) event.stopPropagation();
         if (disposed || accepted) return;
         // Read the control once more before freezing the launch, even if a
         // browser deferred its change event until this click.
-        const current = Number(select.value);
+        const current = String(select.value);
         if (allowed.includes(current) && current !== selected) changed();
         accepted = true;
         const rate = forLaunch();
@@ -292,6 +308,7 @@
         waitForStart() { return startPromise; },
         isDisposed() { return disposed; },
         forLaunch,
+        monoForLaunch,
         cleanup
       };
     }
@@ -830,6 +847,20 @@
       }
     }
 
+    // HK-MONO-PATCH:BEGIN
+function prepareHollowKnightMonoFramework(source) {
+  let patched = source;
+  const audioMonoReplacements = [["var WEBAudio={audioInstances:Object.create(null),nextAudioId:0,audioContext:{},audioWebEnabled:0,decodeContext:null,requestedDecodeSampleRate:32000,decodeFallbackReason:\"\",pendingDecodes:0,pendingEncodedBytes:0,discardedDecodedResults:0,activeDecodes:0,queuedDecodes:0,queuedEncodedBytes:0,maxConcurrentDecodes:0,peakActiveDecodes:0,cancelledQueuedDecodes:0,decodeQueueHead:null,decodeQueueTail:null,decodePumpRunning:false,retired:false,audioResumeTimer:0,compressedBuffers:new WeakSet(),addAudioInstance:function(value){var id=this.nextAudioId++;this.audioInstances[id]=value;return id;},cancelDecode:function(owner){_hkAudioCancelDecode(owner);}};", "var WEBAudio={audioInstances:Object.create(null),nextAudioId:0,audioContext:{},audioWebEnabled:0,decodeContext:null,requestedDecodeSampleRate:32000,decodeFallbackReason:\"\",pendingDecodes:0,pendingEncodedBytes:0,discardedDecodedResults:0,activeDecodes:0,queuedDecodes:0,queuedEncodedBytes:0,maxConcurrentDecodes:0,peakActiveDecodes:0,cancelledQueuedDecodes:0,decodeQueueHead:null,decodeQueueTail:null,decodePumpRunning:false,retired:false,audioResumeTimer:0,compressedBuffers:new WeakSet(),monoOriginalChannels:new WeakMap(),monoEnabled:false,monoConvertedDecodes:0,monoFallbackDecodes:0,monoPhasePreservedDecodes:0,monoFallbackReason:\"\",addAudioInstance:function(value){var id=this.nextAudioId++;this.audioInstances[id]=value;return id;},cancelDecode:function(owner){_hkAudioCancelDecode(owner);}};\n\n// A real one-channel payload is needed for a memory reduction. Changing a\n// destination's channelCount would leave the decoded stereo buffer allocated.\n// Only compressed stereo decodes enter this helper; imported PCM is unchanged.\nfunction _hkAudioMonoFallback(buffer,reason){\n  WEBAudio.monoFallbackDecodes++;\n  WEBAudio.monoFallbackReason=reason;\n  return buffer;\n}\n\nfunction _hkAudioPrepareMono(buffer){\n  if(!WEBAudio.monoEnabled||WEBAudio.retired||buffer.numberOfChannels!==2)return buffer;\n  if(typeof buffer.copyFromChannel!==\"function\"||typeof WEBAudio.audioContext.createBuffer!==\"function\"){\n    return _hkAudioMonoFallback(buffer,\"Mono conversion unavailable; stereo retained\");\n  }\n  var stage=\"reading stereo samples\";\n  try{\n    var length=buffer.length,rate=buffer.sampleRate;\n    if(!Number.isSafeInteger(length)||length<1||!Number.isFinite(rate)||rate<=0){\n      return _hkAudioMonoFallback(buffer,\"Invalid stereo metadata; stereo retained\");\n    }\n    // At most 128 KiB of JS sample scratch, independent of clip duration.\n    // copyFromChannel avoids acquiring whole-channel Float32Array copies.\n    var chunk=Math.min(16384,length),left=new Float32Array(chunk),right=new Float32Array(chunk);\n    var inputEnergy=0,mixedEnergy=0,offset,count,j,l,r,m;\n    // Check cancellation before allocating a replacement. Preserve stereo if\n    // mean mono energy is below 25% of mean input-channel energy (-6.02 dB).\n    // This is a whole-clip safeguard, not a guarantee for each short passage.\n    for(offset=0;offset<length;offset+=chunk){\n      count=Math.min(chunk,length-offset);\n      buffer.copyFromChannel(left,0,offset);\n      buffer.copyFromChannel(right,1,offset);\n      for(j=0;j<count;j++){\n        l=left[j];r=right[j];m=0.5*l+0.5*r;\n        inputEnergy+=l*l+r*r;mixedEnergy+=m*m;\n      }\n    }\n    if(!Number.isFinite(inputEnergy)||!Number.isFinite(mixedEnergy)){\n      return _hkAudioMonoFallback(buffer,\"Non-finite audio samples; stereo retained\");\n    }\n    if(mixedEnergy<0.125*inputEnergy){\n      WEBAudio.monoPhasePreservedDecodes++;\n      WEBAudio.monoFallbackReason=\"Phase cancellation detected; stereo retained\";\n      return buffer;\n    }\n    // Silence (both energies zero) is safe to convert. Native decoder storage\n    // and this mono destination coexist temporarily until the stereo is GC'd.\n    stage=\"allocating a mono buffer\";\n    var mono=WEBAudio.audioContext.createBuffer(1,length,rate);\n    if(!mono||mono.numberOfChannels!==1||mono.length!==length||mono.sampleRate!==rate||typeof mono.copyToChannel!==\"function\"){\n      return _hkAudioMonoFallback(buffer,\"Mono buffer API unavailable; stereo retained\");\n    }\n    stage=\"writing mono samples\";\n    for(offset=0;offset<length;offset+=chunk){\n      count=Math.min(chunk,length-offset);\n      buffer.copyFromChannel(left,0,offset);\n      buffer.copyFromChannel(right,1,offset);\n      for(j=0;j<count;j++)left[j]=0.5*left[j]+0.5*right[j];\n      mono.copyToChannel(count===chunk?left:left.subarray(0,count),0,offset);\n    }\n    if(WEBAudio.retired)return buffer;\n    // The value is just a channel count. Neither the original buffer nor PCM\n    // arrays are retained by diagnostics after this function returns.\n    WEBAudio.monoOriginalChannels.set(mono,2);\n    WEBAudio.monoConvertedDecodes++;\n    return mono;\n  }catch(error){\n    // A valid decoded clip remains usable if this optional conversion fails.\n    return _hkAudioMonoFallback(buffer,\"Mono conversion failed while \"+stage+\"; stereo retained\");\n  }\n}"], ["function _hkAudioFinishDecode(job,failed,buffer){\n  if(job.settled)return;\n  job.settled=true;\n  if(job.active){job.active=false;WEBAudio.activeDecodes--;}\n  _hkAudioRemoveQueued(job);\n  WEBAudio.pendingDecodes--;WEBAudio.pendingEncodedBytes-=job.bytes;\n  var owner=job.owner;job.owner=null;job.data=null;\n  var owned=owner&&!owner.__hkReleased&&WEBAudio.audioInstances[job.id]===owner;\n  if(owner)owner.__hkDecodeJob=null;\n  if(failed){\n    if(owned){owner.error=true;console.log(\"Decode error.\");}\n  }else if(buffer){\n    if(owned){WEBAudio.compressedBuffers.add(buffer);owner.buffer=buffer;}\n    else WEBAudio.discardedDecodedResults++;\n  }\n  _hkAudioPumpDecodes();\n}", "function _hkAudioFinishDecode(job,failed,buffer){\n  if(job.settled)return;\n  job.settled=true;\n  if(job.active){job.active=false;WEBAudio.activeDecodes--;}\n  _hkAudioRemoveQueued(job);\n  WEBAudio.pendingDecodes--;WEBAudio.pendingEncodedBytes-=job.bytes;\n  var owner=job.owner;job.owner=null;job.data=null;\n  var owned=!WEBAudio.retired&&owner&&!owner.__hkReleased&&WEBAudio.audioInstances[job.id]===owner;\n  if(owner)owner.__hkDecodeJob=null;\n  if(failed){\n    if(owned){owner.error=true;console.log(\"Decode error.\");}\n  }else if(buffer){\n    if(owned){\n      // Ownership is checked before any sample reads or mono allocation.\n      buffer=_hkAudioPrepareMono(buffer);\n      if(!WEBAudio.retired&&!owner.__hkReleased&&WEBAudio.audioInstances[job.id]===owner){\n        WEBAudio.compressedBuffers.add(buffer);owner.buffer=buffer;\n      }else WEBAudio.discardedDecodedResults++;\n    }else WEBAudio.discardedDecodedResults++;\n  }\n  _hkAudioPumpDecodes();\n}"], ["Module.__hkAudioMemorySnapshot=function(){\n  var seen=new WeakSet(),handles=0,clips=0,channels=0,buffers=0,bytes=0,compressedBytes=0,pcmBytes=0,originalEstimate=0;\n  var playbackRate=WEBAudio.audioContext.sampleRate||0;\n  function count(buffer){\n    if(!buffer||seen.has(buffer))return;\n    seen.add(buffer);buffers++;\n    var size=buffer.length*buffer.numberOfChannels*4;\n    bytes+=size;\n    if(WEBAudio.compressedBuffers.has(buffer)){\n      compressedBytes+=size;\n      // A counterfactual PCM payload at the original playback decoder's rate,\n      // not measured savings or browser resident memory. Rounding is estimated.\n      if(playbackRate&&buffer.sampleRate)originalEstimate+=Math.round(buffer.length*playbackRate/buffer.sampleRate)*buffer.numberOfChannels*4;\n    }else pcmBytes+=size;\n  }\n  for(var id in WEBAudio.audioInstances){\n    var value=WEBAudio.audioInstances[id];\n    if(!value||value.__hkReleased)continue;\n    handles++;\n    if(value.source){channels++;count(value.source.buffer);}\n    else{clips++;count(value.buffer);}\n  }\n  var decoder=WEBAudio.decodeContext||WEBAudio.audioContext;\n  return {scope:\"JS-owned AudioBuffer PCM payload; excludes decoder and driver copies\",liveHandles:handles,clipHandles:clips,channelHandles:channels,uniqueDecodedBuffers:buffers,decodedPCMBytes:bytes,decodedCompressedPCMBytes:compressedBytes,importedPCMBytes:pcmBytes,estimatedCompressedPCMBytesAtPlaybackRate:originalEstimate,estimatedCompressedPCMSavingsAtPlaybackRate:Math.max(0,originalEstimate-compressedBytes),pendingDecodes:WEBAudio.pendingDecodes,pendingEncodedAudioBytes:WEBAudio.pendingEncodedBytes,discardedDecodeResults:WEBAudio.discardedDecodedResults,nextAudioHandle:WEBAudio.nextAudioId,activeDecodes:WEBAudio.activeDecodes,queuedDecodes:WEBAudio.queuedDecodes,queuedEncodedAudioBytes:WEBAudio.queuedEncodedBytes,decodeConcurrencyLimit:WEBAudio.maxConcurrentDecodes,peakActiveDecodes:WEBAudio.peakActiveDecodes,cancelledQueuedDecodes:WEBAudio.cancelledQueuedDecodes,requestedDecodeSampleRate:WEBAudio.requestedDecodeSampleRate,decodeSampleRate:WEBAudio.retired?0:decoder.sampleRate||0,playbackSampleRate:playbackRate,decodeFallbackReason:WEBAudio.decodeFallbackReason,audioRetired:WEBAudio.retired?1:0};\n};", "// Requested snapshots read buffer metadata only, never PCM. Counts include a\n// playing source after its clip handle is released and deduplicate identities.\nModule.__hkAudioMemorySnapshot=function(){\n  var seen=new WeakSet(),handles=0,clips=0,channels=0,buffers=0,bytes=0,compressedBytes=0,pcmBytes=0,originalEstimate=0;\n  var monoEligibleBuffers=0,monoEligibleBytes=0,monoConvertedBuffers=0,monoConvertedBytes=0,monoSavedBytes=0,monoRemainingStereoBuffers=0;\n  var playbackRate=WEBAudio.audioContext.sampleRate||0;\n  function count(buffer){\n    if(!buffer||seen.has(buffer))return;\n    seen.add(buffer);buffers++;\n    var size=buffer.length*buffer.numberOfChannels*4;\n    bytes+=size;\n    if(WEBAudio.compressedBuffers.has(buffer)){\n      compressedBytes+=size;\n      var originalChannels=WEBAudio.monoOriginalChannels.get(buffer)||buffer.numberOfChannels;\n      // Counterfactual PCM at the original playback decoder's rate, including\n      // original channels. This is not browser process memory or measured RAM.\n      if(playbackRate&&buffer.sampleRate)originalEstimate+=Math.round(buffer.length*playbackRate/buffer.sampleRate)*originalChannels*4;\n      if(originalChannels===2){\n        var originalSize=buffer.length*originalChannels*4;\n        monoEligibleBuffers++;monoEligibleBytes+=originalSize;\n        if(buffer.numberOfChannels===1){\n          monoConvertedBuffers++;monoConvertedBytes+=size;\n          monoSavedBytes+=originalSize-size;\n        }else monoRemainingStereoBuffers++;\n      }\n    }else pcmBytes+=size;\n  }\n  for(var id in WEBAudio.audioInstances){\n    var value=WEBAudio.audioInstances[id];\n    if(!value||value.__hkReleased)continue;\n    handles++;\n    if(value.source){channels++;count(value.source.buffer);}\n    else{clips++;count(value.buffer);}\n  }\n  var decoder=WEBAudio.decodeContext||WEBAudio.audioContext;\n  return {scope:\"JS-owned AudioBuffer PCM payload; excludes decoder and driver copies\",liveHandles:handles,clipHandles:clips,channelHandles:channels,uniqueDecodedBuffers:buffers,decodedPCMBytes:bytes,decodedCompressedPCMBytes:compressedBytes,importedPCMBytes:pcmBytes,estimatedCompressedPCMBytesAtPlaybackRate:originalEstimate,estimatedCompressedPCMSavingsAtPlaybackRate:Math.max(0,originalEstimate-compressedBytes),pendingDecodes:WEBAudio.pendingDecodes,pendingEncodedAudioBytes:WEBAudio.pendingEncodedBytes,discardedDecodeResults:WEBAudio.discardedDecodedResults,nextAudioHandle:WEBAudio.nextAudioId,activeDecodes:WEBAudio.activeDecodes,queuedDecodes:WEBAudio.queuedDecodes,queuedEncodedAudioBytes:WEBAudio.queuedEncodedBytes,decodeConcurrencyLimit:WEBAudio.maxConcurrentDecodes,peakActiveDecodes:WEBAudio.peakActiveDecodes,cancelledQueuedDecodes:WEBAudio.cancelledQueuedDecodes,requestedDecodeSampleRate:WEBAudio.requestedDecodeSampleRate,decodeSampleRate:WEBAudio.retired?0:decoder.sampleRate||0,playbackSampleRate:playbackRate,decodeFallbackReason:WEBAudio.decodeFallbackReason,audioRetired:WEBAudio.retired?1:0,monoEnabled:WEBAudio.monoEnabled?1:0,monoEligibleBuffers:monoEligibleBuffers,monoEligiblePCMBytes:monoEligibleBytes,monoConvertedBuffers:monoConvertedBuffers,monoConvertedPCMBytes:monoConvertedBytes,monoPCMBytesSaved:monoSavedBytes,monoRemainingStereoBuffers:monoRemainingStereoBuffers,monoConvertedDecodes:WEBAudio.monoConvertedDecodes,monoFallbackDecodes:WEBAudio.monoFallbackDecodes,monoPhasePreservedDecodes:WEBAudio.monoPhasePreservedDecodes,monoFallbackReason:WEBAudio.monoFallbackReason};\n};"], ["function _JS_Sound_Init(){\n  if(WEBAudio.retired||WEBAudio.audioWebEnabled)return;\n  try{\n    window.AudioContext=window.AudioContext||window.webkitAudioContext;\n    // Keep the real-time clock, hardware rate, and output scheduling unchanged.\n    WEBAudio.audioContext=new AudioContext;\n    WEBAudio.decodeContext=WEBAudio.audioContext;\n    var rate=Module.__hkAudioDecodeSampleRate;\n    if(rate!==0&&rate!==24000&&rate!==32000)rate=32000;\n    WEBAudio.requestedDecodeSampleRate=rate;\n    // Keep original immediate admission by default. Two requests at a time is\n    // an explicit experiment: queued loads can change readiness and memory mix.\n    WEBAudio.maxConcurrentDecodes=Module.__hkAudioDecodeConcurrency===2?2:0;\n    WEBAudio.decodeFallbackReason=\"\";\n    if(rate&&WEBAudio.audioContext.sampleRate<=rate){\n      // Do not upsample unusual low-rate hardware or create a redundant decoder.\n      WEBAudio.decodeFallbackReason=\"Playback sample rate already at or below decode target\";\n    }else if(rate){\n      var Offline=window.OfflineAudioContext||window.webkitOfflineAudioContext;\n      if(typeof Offline!==\"function\"){\n        WEBAudio.decodeFallbackReason=\"OfflineAudioContext unavailable; using playback decoder\";\n      }else{\n        try{\n          // No offline rendering is started. decodeAudioData resamples to this\n          // context's rate before returning an AudioBuffer; the one-frame\n          // constructor buffer is not the soundtrack or an output clock.\n          var decoder=new Offline(1,1,rate);\n          if(typeof decoder.decodeAudioData!==\"function\"||decoder.sampleRate!==rate)throw new Error(\"Offline decode unavailable\");\n          WEBAudio.decodeContext=decoder;\n        }catch(error){\n          WEBAudio.decodeFallbackReason=\"OfflineAudioContext creation failed; using playback decoder\";\n        }\n      }\n    }\n    var e=Module.setInterval(function(){Module.__hkLifecycle.audioTick(e)},400);\n    WEBAudio.audioResumeTimer=e;\n    WEBAudio.audioWebEnabled=1;\n  }catch(error){alert(\"Web Audio API is not supported in this browser\");}\n}", "function _JS_Sound_Init(){\n  if(WEBAudio.retired||WEBAudio.audioWebEnabled)return;\n  try{\n    window.AudioContext=window.AudioContext||window.webkitAudioContext;\n    // Keep the real-time clock, hardware rate, and output scheduling unchanged.\n    WEBAudio.audioContext=new AudioContext;\n    WEBAudio.decodeContext=WEBAudio.audioContext;\n    // Freeze the launch choice; changing a setting affects the next launch.\n    WEBAudio.monoEnabled=Module.__hkAudioMono===true;\n    var rate=Module.__hkAudioDecodeSampleRate;\n    if(rate!==0&&rate!==24000&&rate!==32000)rate=32000;\n    WEBAudio.requestedDecodeSampleRate=rate;\n    // Keep original immediate admission by default. Two requests at a time is\n    // an explicit experiment: queued loads can change readiness and memory mix.\n    WEBAudio.maxConcurrentDecodes=Module.__hkAudioDecodeConcurrency===2?2:0;\n    WEBAudio.decodeFallbackReason=\"\";\n    if(rate&&WEBAudio.audioContext.sampleRate<=rate){\n      // Do not upsample unusual low-rate hardware or create a redundant decoder.\n      WEBAudio.decodeFallbackReason=\"Playback sample rate already at or below decode target\";\n    }else if(rate){\n      var Offline=window.OfflineAudioContext||window.webkitOfflineAudioContext;\n      if(typeof Offline!==\"function\"){\n        WEBAudio.decodeFallbackReason=\"OfflineAudioContext unavailable; using playback decoder\";\n      }else{\n        try{\n          // No offline rendering is started. decodeAudioData resamples to this\n          // context's rate before returning an AudioBuffer; the one-frame\n          // constructor buffer is not the soundtrack or an output clock.\n          var decoder=new Offline(1,1,rate);\n          if(typeof decoder.decodeAudioData!==\"function\"||decoder.sampleRate!==rate)throw new Error(\"Offline decode unavailable\");\n          WEBAudio.decodeContext=decoder;\n        }catch(error){\n          WEBAudio.decodeFallbackReason=\"OfflineAudioContext creation failed; using playback decoder\";\n        }\n      }\n    }\n    var e=Module.setInterval(function(){Module.__hkLifecycle.audioTick(e)},400);\n    WEBAudio.audioResumeTimer=e;\n    WEBAudio.audioWebEnabled=1;\n  }catch(error){alert(\"Web Audio API is not supported in this browser\");}\n}"], ["Module.__hkAudioRetire=function(){\n  if(WEBAudio.retired)return;\n  WEBAudio.retired=true;WEBAudio.audioWebEnabled=0;\n  if(WEBAudio.audioResumeTimer&&typeof Module.clearInterval===\"function\")Module.clearInterval(WEBAudio.audioResumeTimer);\n  WEBAudio.audioResumeTimer=0;\n  for(var id in WEBAudio.audioInstances){\n    var owner=WEBAudio.audioInstances[id];\n    try{_JS_Sound_ReleaseInstance(id);}\n    catch(error){\n      // Complete ownership cleanup even if a browser node rejects stop(). The\n      // surrounding lifecycle then closes the real-time context separately.\n      if(owner){owner.__hkReleased=true;_hkAudioCancelDecode(owner);owner.buffer=null;}\n      delete WEBAudio.audioInstances[id];\n      console.error(\"Audio instance cleanup failed.\");\n    }\n  }\n  WEBAudio.decodeContext=null;\n  WEBAudio.compressedBuffers=new WeakSet();\n};", "Module.__hkAudioRetire=function(){\n  if(WEBAudio.retired)return;\n  WEBAudio.retired=true;WEBAudio.audioWebEnabled=0;\n  if(WEBAudio.audioResumeTimer&&typeof Module.clearInterval===\"function\")Module.clearInterval(WEBAudio.audioResumeTimer);\n  WEBAudio.audioResumeTimer=0;\n  for(var id in WEBAudio.audioInstances){\n    var owner=WEBAudio.audioInstances[id];\n    try{_JS_Sound_ReleaseInstance(id);}\n    catch(error){\n      // Complete ownership cleanup even if a browser node rejects stop(). The\n      // surrounding lifecycle then closes the real-time context separately.\n      if(owner){owner.__hkReleased=true;_hkAudioCancelDecode(owner);owner.buffer=null;}\n      delete WEBAudio.audioInstances[id];\n      console.error(\"Audio instance cleanup failed.\");\n    }\n  }\n  WEBAudio.decodeContext=null;\n  WEBAudio.compressedBuffers=new WeakSet();\n  WEBAudio.monoOriginalChannels=new WeakMap();\n};"]];
+  for (const [before, after] of audioMonoReplacements) {
+    if (patched.indexOf(before) < 0 || patched.indexOf(before) !== patched.lastIndexOf(before)) {
+      throw new Error('Unexpected Unity mono audio layout; runtime patches were not applied.');
+    }
+    patched = patched.replace(before, after);
+  }
+  return patched;
+}
+    // HK-MONO-PATCH:END
+
     async function prepareFrameworkUrl() {
       const sourceUrl =
         buildBase +
@@ -850,7 +881,9 @@
 
       // The existing framework is patched only in this short-lived Blob.
       // A mismatched layout fails visibly instead of silently skipping the fix.
-      const source = prepareHollowKnightFramework(await response.text());
+      const source = prepareHollowKnightMonoFramework(
+        prepareHollowKnightFramework(await response.text())
+      );
       frameworkObjectUrl = URL.createObjectURL(
         new Blob([source], { type: 'text/javascript' })
       );
@@ -976,6 +1009,7 @@
         const unityConfig = {
           __hkLifecycle: lifecycle,
           __hkAudioDecodeSampleRate: launchRate,
+          __hkAudioMono: audioMemoryPanel.monoForLaunch(),
           preMainLoop: () => lifecycle.beforeFrame(),
           errorHandler: error => lifecycle.runtimeError(error),
           // Keep desktop growth unchanged. iPadOS can present a Mac user agent.
