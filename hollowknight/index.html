@@ -69,7 +69,7 @@
     <progress id="progress" value="0" max="1"></progress>
     <div id="data-progress">Game data streamed: 0 / 869 MB archive</div>
     <div id="retry-status"></div>
-    <div id="build-version">Version: HK-WebGL 2026.11.21-r17-ui2</div>
+    <div id="build-version">Version: HK-WebGL 2026.11.24-r17-texture2</div>
   </div>
 
   <section id="launch-settings" aria-label="Game settings">
@@ -91,7 +91,7 @@
   </section>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.11.22-r17-texture1';
+    const BUILD_VERSION = 'HK-WebGL 2026.11.24-r17-texture2';
     const BUILD_TOKEN = '2026.11.20-r17';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
@@ -110,11 +110,21 @@
     const dataBase = buildBase + 'data4m/';
 
     const TEXTURE_VERSION = '2026.11.22-texture1';
-    const TEXTURE_MANIFEST_URL = buildBase + "texture-memory/hk.astc.manifest.json";
+    // This revision contains the existing, flat texture-memory directory.
+    // Read the complete add-on from its immutable source: jsDelivr rejects
+    // uncached files in this repository with its package-size limit.
+    const TEXTURE_ASSET_BASE =
+      'https://raw.githubusercontent.com/itsspeclix-gif/games/' +
+      'b4e1c706a575aa85a403a7cac94fa08751836160/hollowknight/build/texture-memory/';
+    const TEXTURE_MANIFEST_URL = TEXTURE_ASSET_BASE + 'hk.astc.manifest.json';
     const TEXTURE_MANIFEST_SHA256 = "4802f462298bf483622a24e6d9c2a2cd0b3e974e9ff11e59895bb368c7d92460";
     const TEXTURE_MANIFEST_BYTES = 86532;
-    const TEXTURE_FS_URL = buildBase + "texture-memory/hk.texturefs.016d263df9ed.js";
-    const TEXTURE_PRELOAD_URL = buildBase + "texture-memory/hk.texturepreload.d50fd25e11bc.js";
+    const TEXTURE_FS_URL = TEXTURE_ASSET_BASE + 'hk.texturefs.016d263df9ed.js';
+    const TEXTURE_FS_SHA256 = '016d263df9ed4fa06190ceec49aa7ff6f098eafbe2eff01442d2be2af4ac22d6';
+    const TEXTURE_FS_BYTES = 111475;
+    const TEXTURE_PRELOAD_URL = TEXTURE_ASSET_BASE + 'hk.texturepreload.d50fd25e11bc.js';
+    const TEXTURE_PRELOAD_SHA256 = 'd50fd25e11bc36e49b076663ec8ac72329d300d34139b632369cbe410fc93bc1';
+    const TEXTURE_PRELOAD_BYTES = 39155;
 
 
     const canvas = document.getElementById('game');
@@ -804,6 +814,29 @@ function prepareHollowKnightAudioFramework(source) {
     let preloadInstallTask = null;
     let preloadRetryTimer = null;
 
+    async function verifyTextureBytes(bytes, expectedLength, expectedHash, label) {
+      if (bytes.byteLength !== expectedLength) throw new Error(label + ' length differs');
+      if (window.crypto && window.crypto.subtle) {
+        const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+        const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+        if (hash !== expectedHash) throw new Error(label + ' identity differs');
+      }
+    }
+
+    async function loadTextureScript(url, expectedLength, expectedHash, label) {
+      // Raw GitHub is a fetch source, not a script element source: its MIME
+      // type forbids direct script execution. Execute verified bytes through
+      // the same Blob mechanism already used by the Unity framework.
+      const response = await fetchWithRetry(url, { cache: 'force-cache' }, label);
+      if (!response.ok) throw new Error(label + ' HTTP ' + response.status);
+      const bytes = await response.arrayBuffer();
+      await verifyTextureBytes(bytes, expectedLength, expectedHash, label);
+      if (launchSettings.isDisposed()) throw new Error('The Hollow Knight session has already ended.');
+      const scriptUrl = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
+      try { await loadScriptOnce(scriptUrl); }
+      finally { URL.revokeObjectURL(scriptUrl); }
+    }
+
     // The game uses its original textures unless this device accepts the
     // complete LDR format set used by the alternate assets.
     function probeTextureSupport() {
@@ -870,12 +903,7 @@ function prepareHollowKnightAudioFramework(source) {
         });
         if (!response.ok) throw new Error('Texture manifest HTTP ' + response.status);
         const bytes = await response.arrayBuffer();
-        if (bytes.byteLength !== TEXTURE_MANIFEST_BYTES) throw new Error('Texture manifest length differs');
-        if (window.crypto && window.crypto.subtle) {
-          const digest = await window.crypto.subtle.digest('SHA-256', bytes);
-          const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
-          if (hash !== TEXTURE_MANIFEST_SHA256) throw new Error('Texture manifest identity differs');
-        }
+        await verifyTextureBytes(bytes, TEXTURE_MANIFEST_BYTES, TEXTURE_MANIFEST_SHA256, 'Texture manifest');
         const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
         const base = manifest.baseArchive;
         if (manifest.schemaVersion !== 1 || !base ||
@@ -981,7 +1009,7 @@ function prepareHollowKnightAudioFramework(source) {
             message.textContent = 'Preparing textures…';
             textureOverlay = await loadTextureManifest();
             if (launchSettings.isDisposed()) return;
-            await loadScript(TEXTURE_FS_URL, 'texture filesystem');
+            await loadTextureScript(TEXTURE_FS_URL, TEXTURE_FS_BYTES, TEXTURE_FS_SHA256, 'Texture filesystem');
             if (window.__hkTextureOverlayVersion !== TEXTURE_VERSION ||
                 window.__hkStabilityFSVersion !== BUILD_TOKEN) {
               throw new Error('Texture filesystem version differs');
@@ -1027,10 +1055,11 @@ function prepareHollowKnightAudioFramework(source) {
 
         let neighborPreloadReady = false;
         try {
-          await loadScript(
-            textureOverlay ? TEXTURE_PRELOAD_URL : RUNTIME_SCRIPT_BASE + 'hk.preload.js' + versionQuery,
-            'preloader'
-          );
+          if (textureOverlay) {
+            await loadTextureScript(TEXTURE_PRELOAD_URL, TEXTURE_PRELOAD_BYTES, TEXTURE_PRELOAD_SHA256, 'Texture preloader');
+          } else {
+            await loadScript(RUNTIME_SCRIPT_BASE + 'hk.preload.js' + versionQuery, 'preloader');
+          }
           neighborPreloadReady =
             typeof window.installHollowKnightNeighborPreload === 'function' &&
             window.__hkPreloadVersion === BUILD_TOKEN &&
