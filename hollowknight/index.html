@@ -91,7 +91,7 @@
   </section>
 
   <script>
-    const BUILD_VERSION = 'HK-WebGL 2026.11.21-r17-ui2';
+    const BUILD_VERSION = 'HK-WebGL 2026.11.22-r17-texture1';
     const BUILD_TOKEN = '2026.11.20-r17';
     // Immutable copy of this archive, used only after two failed CDN reads.
     // Update this revision together with the data geometry if assets change.
@@ -108,6 +108,14 @@
     const RUNTIME_SCRIPT_BASE = "https://cdn.jsdelivr.net/gh/itsspeclix-gif/games@fdbc88ddcbe0b06a8c55f9eccc63093cc8767d3b/hollowknight/build/";
     const buildBase = 'build/';
     const dataBase = buildBase + 'data4m/';
+
+    const TEXTURE_VERSION = '2026.11.22-texture1';
+    const TEXTURE_MANIFEST_URL = buildBase + "texture-memory/astc-4802f462298b/hk.astc.manifest.json";
+    const TEXTURE_MANIFEST_SHA256 = "4802f462298bf483622a24e6d9c2a2cd0b3e974e9ff11e59895bb368c7d92460";
+    const TEXTURE_MANIFEST_BYTES = 86532;
+    const TEXTURE_FS_URL = buildBase + "texture-memory/hk.texturefs.016d263df9ed.js";
+    const TEXTURE_PRELOAD_URL = buildBase + "texture-memory/hk.texturepreload.d50fd25e11bc.js";
+
 
     const canvas = document.getElementById('game');
     const loading = document.getElementById('loading');
@@ -780,9 +788,9 @@ function prepareHollowKnightAudioFramework(source) {
 
       // The existing framework is patched only in this short-lived Blob.
       // A mismatched layout fails visibly instead of silently skipping the fix.
-      const source = prepareHollowKnightAudioFramework(
+      const source = prepareHollowKnightTextureFramework(prepareHollowKnightAudioFramework(
         prepareHollowKnightFramework(await response.text())
-      );
+      ));
       frameworkObjectUrl = URL.createObjectURL(
         new Blob([source], { type: 'text/javascript' })
       );
@@ -790,10 +798,130 @@ function prepareHollowKnightAudioFramework(source) {
       return frameworkObjectUrl;
     }
 
+    let textureOverlay = null;
     let preloadModule = null;
     let preloadUrls = null;
     let preloadInstallTask = null;
     let preloadRetryTimer = null;
+
+    // The game uses its original textures unless this device accepts the
+    // complete LDR format set used by the alternate assets.
+    function probeTextureSupport() {
+      let foundContext = false;
+      for (const kind of ['webgl2', 'webgl']) {
+        const probe = document.createElement('canvas');
+        probe.width = probe.height = 1;
+        let gl = null, texture = null;
+        try {
+          gl = probe.getContext(kind, {
+            alpha: false, depth: false, stencil: false, antialias: false,
+            preserveDrawingBuffer: false
+          });
+          if (!gl) continue;
+          foundContext = true;
+          const extension = gl.getExtension('WEBGL_compressed_texture_astc');
+          if (!extension || typeof extension.getSupportedProfiles !== 'function' ||
+              !extension.getSupportedProfiles().includes('ldr')) return false;
+          const formats = Array.from(gl.getParameter(gl.COMPRESSED_TEXTURE_FORMATS) || []);
+          const block = new Uint8Array([252,253,255,255,255,255,255,255,127,127,63,63,191,191,255,255]);
+          // Test non-block-aligned dimensions as well as linear/sRGB uploads.
+          for (const [format, footprint] of [[0x93b0,4],[0x93d0,4],[0x93b4,6],[0x93d4,6]]) {
+            if (!formats.includes(format)) return false;
+            const count = Math.ceil(7 / footprint) * Math.ceil(5 / footprint);
+            const pixels = new Uint8Array(count * 16);
+            for (let i = 0; i < count; i++) pixels.set(block, i * 16);
+            texture = gl.createTexture();
+            if (!texture) return false;
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.compressedTexImage2D(gl.TEXTURE_2D, 0, format, 7, 5, 0, pixels);
+            if (gl.getError() !== gl.NO_ERROR) return false;
+            gl.deleteTexture(texture);
+            texture = null;
+          }
+        } catch (_) {
+          return false;
+        } finally {
+          if (gl) {
+            try { if (texture) gl.deleteTexture(texture); } catch (_) {}
+            try {
+              const lose = gl.getExtension('WEBGL_lose_context');
+              if (lose) lose.loseContext();
+            } catch (_) {}
+          }
+          probe.width = probe.height = 1;
+        }
+      }
+      return foundContext;
+    }
+
+    async function loadTextureManifest() {
+      const manifestUrl = new URL(TEXTURE_MANIFEST_URL, document.baseURI).href;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      const leave = event => { if (!event.persisted) controller.abort(); };
+      window.addEventListener('pagehide', leave);
+      try {
+        const response = await nativeFetch(manifestUrl, {
+          signal: controller.signal, cache: 'force-cache'
+        });
+        if (!response.ok) throw new Error('Texture manifest HTTP ' + response.status);
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength !== TEXTURE_MANIFEST_BYTES) throw new Error('Texture manifest length differs');
+        if (window.crypto && window.crypto.subtle) {
+          const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+          const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+          if (hash !== TEXTURE_MANIFEST_SHA256) throw new Error('Texture manifest identity differs');
+        }
+        const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+        const base = manifest.baseArchive;
+        if (manifest.schemaVersion !== 1 || !base ||
+            base.partSize !== DATA_PART_SIZE || base.partCount !== DATA_PART_COUNT ||
+            base.totalSize !== DATA_TOTAL_SIZE || base.unityFileOffset !== 9705719 ||
+            base.unityFileSize !== 583132840) throw new Error('Texture manifest base differs');
+        return { manifest, manifestUrl };
+      } finally {
+        clearTimeout(timer);
+        window.removeEventListener('pagehide', leave);
+      }
+    }
+
+    function prepareHollowKnightTextureFramework(source) {
+      // This exact Unity build recognizes the historical WebGL LDR name.
+      // Advertise the equivalent alias only when real hardware support exists.
+      // All three enumeration paths must return a consistent extension count.
+      const supported = 'GLctx.getSupportedExtensions()';
+      if (source.split(supported).length !== 4) {
+        throw new Error('Unexpected Unity graphics layout; texture compatibility patch was not applied.');
+      }
+      source = source.split(supported).join('hkGetTextureExtensions()');
+      const helper = `function hkGetTextureExtensions(){
+  var list=GLctx.getSupportedExtensions()||[];
+  if(!Module.__hkTextureASTC)return list;
+  var ext=GLctx.getExtension("WEBGL_compressed_texture_astc");
+  if(!ext||typeof ext.getSupportedProfiles!=="function"||ext.getSupportedProfiles().indexOf("ldr")<0){
+    throw new Error("The game graphics context cannot use the selected compressed textures. Reopen the game to select a compatible asset set.");
+  }
+  var alias="WEBGL_compressed_texture_astc_ldr";
+  return list.indexOf(alias)<0?list.concat([alias]):list;
+}
+`;
+      const anchor = 'function _glGetString(e){';
+      if (source.split(anchor).length !== 2) throw new Error('Unexpected Unity extension entry point.');
+      source = source.replace(anchor, helper + anchor);
+      const enable = 'return 0==t.indexOf("GL_")&&(t=t.substr(3)),n.GLctx.getExtension(t)?1:0';
+      if (source.split(enable).length !== 2) throw new Error('Unexpected Unity extension enable entry point.');
+      source = source.replace(enable,
+        'if(0==t.indexOf("GL_"))t=t.substr(3);' +
+        'if(Module.__hkTextureASTC&&t==="WEBGL_compressed_texture_astc_ldr"){' +
+          'var a=n.GLctx.getExtension("WEBGL_compressed_texture_astc");' +
+          'return a&&typeof a.getSupportedProfiles==="function"&&a.getSupportedProfiles().indexOf("ldr")>=0?1:0;' +
+        '}return n.GLctx.getExtension(t)?1:0');
+      return source;
+    }
 
     function installNeighborPreload() {
       if (preloadInstallTask) return preloadInstallTask;
@@ -848,10 +976,29 @@ function prepareHollowKnightAudioFramework(source) {
         const versionQuery =
           '?v=' + encodeURIComponent(BUILD_TOKEN);
 
-        await loadScript(
-          RUNTIME_SCRIPT_BASE + 'hk.stabilityfs.js' + versionQuery,
-          'filesystem'
-        );
+        if (probeTextureSupport()) {
+          try {
+            message.textContent = 'Preparing textures…';
+            textureOverlay = await loadTextureManifest();
+            if (launchSettings.isDisposed()) return;
+            await loadScript(TEXTURE_FS_URL, 'texture filesystem');
+            if (window.__hkTextureOverlayVersion !== TEXTURE_VERSION ||
+                window.__hkStabilityFSVersion !== BUILD_TOKEN) {
+              throw new Error('Texture filesystem version differs');
+            }
+          } catch (error) {
+            textureOverlay = null;
+            if (launchSettings.isDisposed()) return;
+            console.warn('Using original textures for this launch:', error);
+            setRetryStatus('');
+          }
+        }
+        if (!textureOverlay) {
+          await loadScript(
+            RUNTIME_SCRIPT_BASE + 'hk.stabilityfs.js' + versionQuery,
+            'filesystem'
+          );
+        }
         // The waiting screen owns departure until the runtime lifecycle exists.
         if (launchSettings.isDisposed()) return;
 
@@ -881,12 +1028,13 @@ function prepareHollowKnightAudioFramework(source) {
         let neighborPreloadReady = false;
         try {
           await loadScript(
-            RUNTIME_SCRIPT_BASE + 'hk.preload.js' + versionQuery,
+            textureOverlay ? TEXTURE_PRELOAD_URL : RUNTIME_SCRIPT_BASE + 'hk.preload.js' + versionQuery,
             'preloader'
           );
           neighborPreloadReady =
             typeof window.installHollowKnightNeighborPreload === 'function' &&
-            window.__hkPreloadVersion === BUILD_TOKEN;
+            window.__hkPreloadVersion === BUILD_TOKEN &&
+            (!textureOverlay || window.__hkTexturePreloadVersion === TEXTURE_VERSION);
           if (!neighborPreloadReady) throw new Error('Preloader script is incompatible: expected ' + BUILD_TOKEN + ', received ' + (window.__hkPreloadVersion || 'no version') + '. Reopen the updated game page.');
         } catch (error) {
           reportPreloadError(error);
@@ -907,6 +1055,7 @@ function prepareHollowKnightAudioFramework(source) {
 
         const unityConfig = {
           __hkLifecycle: lifecycle,
+          __hkTextureASTC: Boolean(textureOverlay),
           __hkAudioDecodeSampleRate: launchChoice.audioRate,
           __hkAudioMono: launchChoice.audioMono,
           preMainLoop: () => lifecycle.beforeFrame(),
@@ -926,10 +1075,14 @@ function prepareHollowKnightAudioFramework(source) {
             await mountUnityDataParts(module, urls, {
               partSize: DATA_PART_SIZE,
               totalSize: DATA_TOTAL_SIZE,
+              textureOverlay,
               onProgress: updateMountProgress,
               fallbackUrls: numberedUrls(DATA_FALLBACK_BASE, 'hk.data', DATA_PART_COUNT),
               onReadError: reportDataReadError
             });
+            // The mounted filesystem now owns normalized ranges and preload
+            // metadata. Release the raw manifest wrapper from page startup.
+            textureOverlay = null;
             // Install while the loader's data dependency is still held, BEFORE
             // Unity can open its first room. A late post-start hook misses them.
             if (neighborPreloadReady) {

@@ -1,0 +1,1849 @@
+(function (global) {
+  'use strict';
+
+  const MAGIC = 'UnityWebData1.0\0';
+  const HEADER_PREFIX_SIZE = MAGIC.length + 4;
+  const CACHE_LIMIT = 60 * 1024 * 1024;
+  const FS_VERSION = '2026.11.20-r17';
+  // Captured before index.html installs its startup-only fetch wrapper, so
+  // bootstrap has one bounded retry loop covering headers AND body reads.
+  const dataFetch = global.fetch.bind(global);
+  let retrySerial = 0;
+  global.__hkStabilityFSVersion = FS_VERSION;
+
+  function errorText(error) {
+    return error && error.message ? error.message : String(error);
+  }
+
+  function setMessage(text) {
+    const element = document.getElementById('message');
+    // Keep the FIRST unrecovered failure visible; later native reads must not
+    // replace it with a misleading 'Streaming...' message.
+    if (element && !global.__hkLastReadFailure) element.textContent = text;
+  }
+
+  function readString(bytes, offset, length) {
+    let value = '';
+    for (let index = 0; index < length; index += 1) {
+      value += String.fromCharCode(bytes[offset + index]);
+    }
+    return value;
+  }
+
+  function validateMagic(bytes) {
+    if (
+      bytes.byteLength < HEADER_PREFIX_SIZE ||
+      readString(bytes, 0, MAGIC.length) !== MAGIC
+    ) {
+      throw new Error('StabilityFS: unexpected UnityWebData archive header');
+    }
+  }
+
+  function parseArchive(header, totalSize) {
+    validateMagic(header);
+
+    const view = new DataView(
+      header.buffer,
+      header.byteOffset,
+      header.byteLength
+    );
+    const headerEnd = view.getUint32(MAGIC.length, true);
+
+    if (
+      headerEnd < HEADER_PREFIX_SIZE ||
+      headerEnd > totalSize ||
+      headerEnd > header.byteLength
+    ) {
+      throw new Error('StabilityFS: invalid archive header length');
+    }
+
+    const entries = [];
+    let position = HEADER_PREFIX_SIZE;
+
+    while (position < headerEnd) {
+      if (position + 12 > headerEnd) {
+        throw new Error('StabilityFS: truncated archive record');
+      }
+
+      const offset = view.getUint32(position, true);
+      position += 4;
+      const size = view.getUint32(position, true);
+      position += 4;
+      const nameLength = view.getUint32(position, true);
+      position += 4;
+
+      if (nameLength > headerEnd - position) {
+        throw new Error('StabilityFS: truncated archive filename');
+      }
+
+      const name = readString(header, position, nameLength);
+      position += nameLength;
+
+      if (offset > totalSize || size > totalSize - offset) {
+        throw new Error('StabilityFS: archive entry outside data file');
+      }
+
+      entries.push({ offset, size, name });
+    }
+
+    if (position !== headerEnd) {
+      throw new Error('StabilityFS: malformed archive header');
+    }
+
+    return entries;
+  }
+
+  function createDirectories(module, fileName) {
+    for (
+      let start = 0, slash = fileName.indexOf('/', start) + 1;
+      slash > 0;
+      start = slash, slash = fileName.indexOf('/', start) + 1
+    ) {
+      module.FS_createPath(
+        fileName.substring(0, start),
+        fileName.substring(start, slash - 1),
+        true,
+        true
+      );
+    }
+  }
+
+  function requestPlan(primary, preferred, fallback) {
+    // Retain both configured sources even after a recovered URL becomes the
+    // preferred cache key. Otherwise backup -> backup -> backup can strand a
+    // read while the primary is healthy. Never invent another data origin.
+    const canonical = value => {
+      const url = new URL(value, document.baseURI);
+      url.searchParams.delete('hk_read_retry');
+      return url.href;
+    };
+    const primaryKey = canonical(primary);
+    const hasBackup = Boolean(fallback && canonical(fallback) !== primaryKey);
+    const preferredBackup = hasBackup && canonical(preferred) === canonical(fallback);
+    const routes = [{ url: preferred, backup: preferredBackup, fresh: false }];
+    if (hasBackup) {
+      routes.push({ url: preferredBackup ? primary : fallback, backup: !preferredBackup, fresh: false });
+      routes.push({ url: preferred, backup: preferredBackup, fresh: true });
+      routes.push({ url: preferredBackup ? primary : fallback, backup: !preferredBackup, fresh: true });
+    } else {
+      routes.push({ url: primary, backup: false, fresh: true });
+      routes.push({ url: primary, backup: false, fresh: true });
+    }
+    return routes;
+  }
+
+  function requestUrl(route) {
+    if (!route.fresh) return route.url;
+    const result = new URL(route.url, document.baseURI);
+    // Query-only retry: no custom headers or CORS preflight. Allocate this
+    // cache-buster only when the attempt is actually needed.
+    result.searchParams.set('hk_read_retry', Date.now().toString(36) + '-' + (++retrySerial));
+    return result.href;
+  }
+
+  function dataFailure(message, detail) {
+    const error = new Error(message);
+    error.name = 'HollowKnightDataError';
+    error.hkDataIO = true;
+    error.detail = detail;
+    return error;
+  }
+
+  function checkResponse(status, actual, expected, url, attempt) {
+    const detail = { url, attempt: attempt + 1, status, expected, actual };
+    // A cached success is delivered as HTTP 200. Bare 304, status 0, 204,
+    // partial 206, and wrong-sized bodies are not valid whole-file responses.
+    if (status !== 200) {
+      throw dataFailure('StabilityFS HTTP ' + status + ' for ' + url, detail);
+    }
+    if (actual !== expected) {
+      throw dataFailure(
+        'StabilityFS: expected ' + expected + ' bytes, got ' + actual +
+        ' for ' + url, detail
+      );
+    }
+  }
+
+  function rememberAttempt(stats, error, detail) {
+    const failure = Object.assign({}, detail, { message: errorText(error) });
+    stats.lastTransportFailure = failure; // One bounded record, not a log.
+    if (detail.actual !== null && detail.actual !== detail.expected) {
+      stats.lengthFailures += 1;
+    }
+    return failure;
+  }
+
+  async function fetchBytes(primary, expected, stats, fallbackUrl, validate, preferred = primary, signal = null, drainOnly = false) {
+    const routes = requestPlan(primary, preferred, fallbackUrl);
+    const transport = { mode: drainOnly ? 'preload' : 'bootstrap', attempts: [], streamFallbacks: 0 };
+    let lastError;
+    for (let attempt = 0; attempt < routes.length; attempt += 1) {
+      const route = routes[attempt];
+      const targetUrl = requestUrl(route);
+      const detail = { url: targetUrl, attempt: attempt + 1, route: route.backup ? 'backup' : 'primary',
+        status: 0, expected, actual: null, elapsedMs: 0, outcome: 'pending' };
+      const started = performance.now();
+      const request = new AbortController();
+      const abort = () => request.abort();
+      let timedOut = false;
+      if (signal) signal.addEventListener('abort', abort, { once: true });
+      // Only asynchronous requests can have an event-loop-driven timeout.
+      const timeout = global.setTimeout(() => { timedOut = true; request.abort(); }, 30000);
+      let response, reader;
+      try {
+        if (signal && signal.aborted) { const cancelled = new Error('Asset preload cancelled'); cancelled.name = 'AbortError'; throw cancelled; }
+        transport.attempts.push(detail);
+        if (!drainOnly && attempt > 0) {
+          stats.bootstrapRetries += 1;
+          setMessage('Retrying archive index (' + (attempt + 1) + '/' + routes.length + ')…');
+        }
+        response = await dataFetch(targetUrl, {
+          cache: route.fresh ? 'reload' : 'force-cache', credentials: 'same-origin', signal: request.signal
+        });
+        detail.status = response.status;
+        if (response.status !== 200) checkResponse(response.status, null, expected, targetUrl, attempt);
+        let bytes;
+        if (drainOnly && response.body && typeof response.body.getReader === 'function') {
+          reader = response.body.getReader();
+          detail.actual = 0;
+          while (true) {
+            const item = await reader.read();
+            if (item.done) break;
+            detail.actual += item.value.byteLength;
+            if (detail.actual > expected) checkResponse(response.status, detail.actual, expected, targetUrl, attempt);
+          }
+        } else {
+          if (drainOnly) transport.streamFallbacks += 1;
+          bytes = new Uint8Array(await response.arrayBuffer());
+          detail.actual = bytes.byteLength;
+        }
+        checkResponse(response.status, detail.actual, expected, targetUrl, attempt);
+        if (request.signal.aborted) throw new Error(timedOut ? 'Asset request timed out' : 'Asset request cancelled');
+        if (validate) validate(bytes);
+        detail.outcome = 'success';
+        if (!drainOnly && attempt > 0) stats.bootstrapRecovered += 1;
+        if (route.backup) stats.fallbackLoads += 1;
+        // A streamed warmup never publishes or retains payload buffers.
+        return { bytes: drainOnly ? undefined : bytes, url: targetUrl, transport };
+      } catch (error) {
+        detail.outcome = signal && signal.aborted ? 'cancelled' : timedOut ? 'timeout' : 'failed';
+        detail.message = timedOut && !(signal && signal.aborted) ? 'Asset request timed out' : errorText(error);
+        lastError = dataFailure('StabilityFS ' + (drainOnly ? 'preload' : 'bootstrap') + ' failed: ' + detail.message,
+          Object.assign({}, detail, { transport }));
+        // Signal cancellation is deliberate, not evidence of a broken host.
+        if (!(signal && signal.aborted)) rememberAttempt(stats, error, detail);
+        request.abort();
+        try {
+          if (reader) await reader.cancel();
+          else if (response && response.body) await response.body.cancel();
+        } catch (_) { /* Keep the original network/body error. */ }
+        if (signal && signal.aborted) throw lastError;
+      } finally {
+        detail.elapsedMs = Math.round(performance.now() - started);
+        if (reader) reader.releaseLock();
+        global.clearTimeout(timeout);
+        if (signal) signal.removeEventListener('abort', abort);
+      }
+    }
+    if (!drainOnly) stats.lastError = lastError.message;
+    throw lastError;
+  }
+
+  function syncWhole(primary, expected, stats, fallbackUrl, reuse, preferred = primary) {
+    const routes = requestPlan(primary, preferred, fallbackUrl);
+    const transport = { mode: 'sync-read', attempts: [] };
+    const started = performance.now();
+    const partName = primary.split('?')[0].split('/').pop() || primary;
+    let lastError;
+    stats.activePart = partName;
+    try {
+      for (let attempt = 0; attempt < routes.length; attempt += 1) {
+        const route = routes[attempt];
+        const targetUrl = requestUrl(route);
+        const attemptStarted = performance.now();
+        const detail = {
+          url: targetUrl, attempt: attempt + 1,
+          status: 0, expected, actual: null, route: route.backup ? 'backup' : 'primary',
+          outcome: 'pending', elapsedMs: 0
+        };
+        transport.attempts.push(detail);
+        stats.phase = attempt ? 'sync-retry' : 'sync-read';
+        if (attempt) stats.syncRetries += 1;
+        setMessage(attempt
+          ? 'Connection interrupted — retrying ' + partName +
+            ' (' + (attempt + 1) + '/' + routes.length + ')…'
+          : 'Streaming ' + partName + '…');
+        let xhr = null;
+        let text = '';
+        try {
+          xhr = new XMLHttpRequest();
+          xhr.open('GET', targetUrl, false);
+          // Do not set responseType=arraybuffer or timeout on a synchronous
+          // main-thread XHR. Keep the established Safari binary-text path.
+          xhr.overrideMimeType('text/plain; charset=x-user-defined');
+          xhr.send(null);
+          detail.status = xhr.status;
+          if (xhr.status !== 200) {
+            checkResponse(xhr.status, null, expected, targetUrl, attempt);
+          }
+          text = xhr.responseText || '';
+          detail.actual = text.length;
+          checkResponse(xhr.status, text.length, expected, targetUrl, attempt);
+        } catch (error) {
+          stats.syncAttemptFailures += 1;
+          detail.outcome = 'failed'; detail.message = errorText(error);
+          lastError = dataFailure(
+            'StabilityFS data request failed: ' + errorText(error),
+            Object.assign({}, rememberAttempt(stats, error, detail), { transport })
+          );
+          continue;
+        } finally {
+          detail.elapsedMs = Math.round(performance.now() - attemptStarted);
+          xhr = null;
+        }
+
+        // Allocate only after exact length validation. Allocation failures
+        // must not trigger three repeated downloads/allocation attempts.
+        let bytes;
+        try {
+          bytes = reuse || new Uint8Array(expected);
+          if (reuse) stats.reusedPartBuffers += 1;
+          else {
+            stats.newPartBuffers += 1;
+            stats.newPartBufferBytes += expected;
+          }
+        } catch (error) {
+          const failure = new Error('StabilityFS: chunk allocation failed: ' + errorText(error));
+          failure.hkAllocationFailure = true;
+          throw failure;
+        }
+        for (let index = 0; index < expected; index += 1) {
+          bytes[index] = text.charCodeAt(index) & 255;
+        }
+        text = '';
+        stats.syncPartLoads += 1;
+        stats.syncBytes += bytes.byteLength;
+        if (attempt) stats.syncRecovered += 1;
+        if (route.backup) stats.fallbackLoads += 1;
+        detail.outcome = 'success';
+        stats.lastSuccessfulTransport = transport;
+        return { bytes, url: targetUrl };
+      }
+      throw lastError;
+    } finally {
+      stats.syncBlockedMs += performance.now() - started;
+      stats.activePart = '';
+    }
+  }
+
+  // A sparse, read-only replacement of data.unity3d. Original and patch parts
+  // share the existing bounded source cache; there is no second bundle copy.
+  function prepareTextureOverlay(request, geometry) {
+    if (!request) return null;
+    const manifest = request.manifest;
+    const fail = message => { throw new Error('Texture overlay: ' + message); };
+    const integer = (value, name, positive = false) => {
+      if (!Number.isSafeInteger(value) || value < (positive ? 1 : 0)) fail('invalid ' + name);
+      return value;
+    };
+    if (!manifest || manifest.schemaVersion !== 1) fail('unsupported manifest version');
+    const base = manifest.baseArchive;
+    if (!base || base.partSize !== geometry.partSize || base.totalSize !== geometry.totalSize ||
+        base.partCount !== geometry.partCount) fail('base archive geometry differs');
+    integer(base.unityFileOffset, 'base bundle offset');
+    integer(base.unityFileSize, 'base bundle size', true);
+    if (base.unityFileOffset > geometry.totalSize ||
+        base.unityFileSize > geometry.totalSize - base.unityFileOffset) fail('base bundle outside archive');
+    const patch = manifest.patch;
+    if (!patch || patch.partSize !== geometry.partSize) fail('patch part size differs');
+    integer(patch.totalSize, 'patch size', true);
+    if (!Array.isArray(patch.parts) || patch.parts.length !== Math.ceil(patch.totalSize / geometry.partSize)) {
+      fail('patch part count differs');
+    }
+    if (!request.manifestUrl || typeof request.manifestUrl !== 'string') fail('missing manifest URL');
+    const manifestUrl = new URL(request.manifestUrl, document.baseURI);
+    if (!/^https?:$/.test(manifestUrl.protocol)) fail('unsupported manifest URL');
+    const fallbackBase = request.fallbackBaseUrl ? new URL(request.fallbackBaseUrl, manifestUrl) : null;
+    if (fallbackBase && !/^https?:$/.test(fallbackBase.protocol)) fail('unsupported fallback URL');
+    const urls = [], fallbackUrls = [], lengths = [];
+    for (let index = 0; index < patch.parts.length; index += 1) {
+      const part = patch.parts[index];
+      const expected = Math.min(geometry.partSize, patch.totalSize - index * geometry.partSize);
+      if (!part || part.size !== expected || typeof part.path !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(part.path) ||
+          part.path.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
+        fail('invalid patch part ' + (index + 1));
+      }
+      urls.push(new URL(part.path, manifestUrl).href);
+      fallbackUrls.push(fallbackBase ? new URL(part.path, fallbackBase).href : null);
+      lengths.push(expected);
+    }
+    const file = manifest.file;
+    if (!file || file.name !== 'data.unity3d') fail('unexpected virtual file');
+    integer(file.size, 'virtual bundle size', true);
+    if (file.size > 2147483647) fail('virtual bundle exceeds supported file offsets');
+    if (!Array.isArray(file.segments) || !file.segments.length || file.segments.length > 100000) {
+      fail('invalid virtual segments');
+    }
+    const segments = [];
+    let end = 0;
+    for (let index = 0; index < file.segments.length; index += 1) {
+      const segment = file.segments[index];
+      if (!Array.isArray(segment) || segment.length !== 4) fail('invalid segment record');
+      const start = integer(segment[0], 'segment start');
+      const length = integer(segment[1], 'segment length', true);
+      const source = segment[2];
+      const offset = integer(segment[3], 'source offset');
+      if (start !== end || (source !== 0 && source !== 1) ||
+          length > file.size - start) fail('virtual segments overlap or leave a gap');
+      const sourceSize = source === 0 ? geometry.totalSize : patch.totalSize;
+      if (offset > sourceSize || length > sourceSize - offset) fail('segment outside source');
+      segments.push([start, length, source, offset]);
+      end += length;
+    }
+    if (end !== file.size) fail('virtual segments do not cover bundle');
+    const physicalCount = geometry.partCount + patch.parts.length;
+    const preload = manifest.preloadMap;
+    const meta = preload && preload._meta;
+    if (!meta || !preload.scenes || typeof preload.scenes !== 'object' ||
+        meta.outerChunkSize !== geometry.partSize || meta.outerChunkCount !== physicalCount ||
+        meta.logicalArchiveSize !== geometry.partCount * geometry.partSize + patch.totalSize ||
+        meta.dataUnity3dSize !== file.size || !meta.unityFS) fail('preload metadata differs');
+    for (const name of Object.keys(preload.scenes)) {
+      const scene = preload.scenes[name];
+      if (!scene || typeof scene !== 'object') fail('invalid preload scene');
+      for (const field of ['dataUnity3dChunks', 'directPreloadChunks']) {
+        if (!Array.isArray(scene[field]) || scene[field].some(part =>
+          !Number.isInteger(part) || part < 1 || part > physicalCount)) fail('invalid preload part');
+      }
+    }
+    function segmentAt(position) {
+      let low = 0, high = segments.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        const segment = segments[middle];
+        if (segment[0] + segment[1] <= position) low = middle + 1;
+        else high = middle;
+      }
+      return low;
+    }
+    function partsForRange(position, length) {
+      if (!Number.isSafeInteger(position) || position < 0 ||
+          !Number.isSafeInteger(length) || length <= 0 || position >= file.size) return [];
+      const last = position + Math.min(length, file.size - position);
+      const parts = [], seen = new Set();
+      let index = segmentAt(position);
+      while (position < last) {
+        const segment = segments[index];
+        const count = Math.min(last - position, segment[0] + segment[1] - position);
+        const sourceStart = segment[3] + position - segment[0];
+        const firstPart = Math.floor(sourceStart / geometry.partSize);
+        const lastPart = Math.floor((sourceStart + count - 1) / geometry.partSize);
+        const poolBase = segment[2] === 1 ? geometry.partCount : 0;
+        for (let part = firstPart; part <= lastPart; part += 1) {
+          const physicalPart = poolBase + part + 1;
+          if (!seen.has(physicalPart)) { seen.add(physicalPart); parts.push(physicalPart); }
+        }
+        position += count;
+        index += 1;
+      }
+      return parts;
+    }
+    return {
+      originalOffset: base.unityFileOffset, originalSize: base.unityFileSize,
+      size: file.size, segments, segmentAt, partsForRange,
+      urls, fallbackUrls, lengths, preloadMap: preload
+    };
+  }
+
+  global.__hkTextureOverlayVersion = "2026.11.22-texture1";
+
+  async function mountUnityDataParts(module, urls, options) {
+    if (
+      !module ||
+      !module.__FS ||
+      typeof module.FS_createDataFile !== 'function'
+    ) {
+      throw new Error('StabilityFS: patched Emscripten FS was not exported');
+    }
+
+    if (!Array.isArray(urls) || urls.length === 0) {
+      throw new Error('StabilityFS: no data part URLs');
+    }
+
+    const settings = options || {};
+    const partSize = Number(settings.partSize);
+    const totalSize = Number(settings.totalSize);
+    const onProgress =
+      typeof settings.onProgress === 'function' ? settings.onProgress : null;
+
+    if (!Number.isSafeInteger(partSize) || partSize <= 0) {
+      throw new Error('StabilityFS: invalid physical part size');
+    }
+    if (!Number.isSafeInteger(totalSize) || totalSize <= 0) {
+      throw new Error('StabilityFS: invalid logical archive size');
+    }
+
+    const expectedParts = Math.ceil(totalSize / partSize);
+    if (urls.length !== expectedParts) {
+      throw new Error(
+        'StabilityFS: expected ' + expectedParts +
+        ' physical parts, got ' + urls.length
+      );
+    }
+
+    const finalPartSize = totalSize - partSize * (urls.length - 1);
+    if (finalPartSize <= 0 || finalPartSize > partSize) {
+      throw new Error('StabilityFS: invalid final part geometry');
+    }
+
+    const partLengths = new Array(urls.length).fill(partSize);
+    partLengths[partLengths.length - 1] = finalPartSize;
+
+    const FS = module.__FS;
+    let fallbackUrls = settings.fallbackUrls || [];
+    if (!Array.isArray(fallbackUrls) ||
+        (fallbackUrls.length !== 0 && fallbackUrls.length !== urls.length)) {
+      throw new Error('StabilityFS: fallback list must match the data parts');
+    }
+    const originalPartCount = urls.length;
+    const textureOverlay = prepareTextureOverlay(settings.textureOverlay, {
+      partSize, totalSize, partCount: originalPartCount
+    });
+    if (textureOverlay) {
+      // Extend one physical pool, rather than adding a second 60 MiB cache.
+      urls = urls.concat(textureOverlay.urls);
+      fallbackUrls = (fallbackUrls.length ? fallbackUrls.slice() :
+        new Array(originalPartCount).fill(null)).concat(textureOverlay.fallbackUrls);
+      partLengths.push(...textureOverlay.lengths);
+      module.__hkTexturePartUrls = urls.slice();
+      module.__hkTexturePartLength = index => partLengths[index];
+      module.__hkTexturePartsForRange = textureOverlay.partsForRange;
+      module.__hkTexturePreloadMap = textureOverlay.preloadMap;
+    }
+    // Remember only URL strings after recovery, not additional data buffers.
+    // An evicted recovered part must not revisit a known-bad cached URL.
+    const preferredUrls = urls.slice();
+    // The preloader must warm the same URL as synchronous reads, including
+    // remembered recovery URLs. Expose strings, never cache data/buffers.
+    module.__hkDataPartUrl = partIndex => preferredUrls[partIndex];
+    const cache = new Map();
+    // Boolean only: never expose buffers or evict demand data for preloading.
+    module.__hkDataPartResident = partIndex => cache.has(partIndex);
+    const demandedParts = new Set();
+    const touchedFiles = new Set();
+    let residentBytes = 0;
+
+    const stats = global.__hkLazyStats = {
+      version: FS_VERSION,
+      phase: 'bootstrap',
+      transport: 'whole-file',
+      totalFiles: 0,
+      loadedFiles: 0,
+      chunkSize: partSize,
+      archiveBytes: totalSize,
+      cacheBytes: 0,
+      cacheLimit: CACHE_LIMIT,
+      cacheItems: 0,
+      cachePeakBytes: 0,
+      cachePeakItems: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      uniqueParts: 0,
+      refetches: 0,
+      evictions: 0,
+      syncPartLoads: 0,
+      // Cumulative decoder allocations/reuse; NOT total device or live memory.
+      newPartBuffers: 0, newPartBufferBytes: 0, reusedPartBuffers: 0,
+      syncRetries: 0,
+      syncAttemptFailures: 0,
+      syncRecovered: 0,
+      bootstrapRetries: 0,
+      bootstrapRecovered: 0,
+      lengthFailures: 0,
+      fallbackLoads: 0,
+      ioFailures: 0,
+      lastTransportFailure: null,
+      lastSuccessfulTransport: null,
+      lastFailure: null,
+      syncBytes: 0,
+      syncBlockedMs: 0,
+      opens: 0,
+      closes: 0,
+      readCalls: 0,
+      readBytes: 0,
+      mmapCalls: 0,
+      mmapBytes: 0,
+      activeFile: '',
+      activePart: '',
+      lastFile: '',
+      lastError: ''
+    };
+
+    module.__hkWarmDataPart = async (partIndex, signal) => {
+      const result = await fetchBytes(urls[partIndex], partLengths[partIndex], stats,
+        fallbackUrls[partIndex], null, preferredUrls[partIndex], signal, true);
+      // Cancellation can occur between fetchBytes resolving and this continuation.
+      if (signal && signal.aborted) throw dataFailure('Asset preload cancelled', { transport: result.transport });
+      // fetchBytes rejects aborted/incomplete responses. Publish the SAME key
+      // that the next required read should use, without touching the RAM LRU.
+      preferredUrls[partIndex] = result.url;
+      return { url: result.url, transport: result.transport };
+    };
+
+    function refreshCacheStats() {
+      stats.cacheBytes = residentBytes;
+      stats.cacheItems = cache.size;
+      stats.cachePeakBytes = Math.max(stats.cachePeakBytes, residentBytes);
+      stats.cachePeakItems = Math.max(stats.cachePeakItems, cache.size);
+    }
+
+    function touchPart(partIndex, record) {
+      cache.delete(partIndex);
+      cache.set(partIndex, record);
+      return record.bytes;
+    }
+
+    function evictFor(bytesNeeded) {
+      if (bytesNeeded > CACHE_LIMIT) {
+        throw new Error('StabilityFS: one physical part exceeds cache limit');
+      }
+
+      let reuse = null;
+      // Evict before the XHR/allocation. This keeps the resident source cache
+      // below its 60 MiB ceiling even during a new-part fetch.
+      while (residentBytes + bytesNeeded > CACHE_LIMIT && cache.size > 0) {
+        const victim = cache.keys().next().value;
+        const record = cache.get(victim);
+        cache.delete(victim);
+        residentBytes -= record.bytes.byteLength;
+        // Only detached-from-cache storage is reusable. Nothing outside this
+        // filesystem owns a source buffer; reads copy bytes before the next miss.
+        // Keep no spare-buffer pool and never overwrite a still-cached part.
+        if (record.bytes.byteLength === bytesNeeded) reuse = record.bytes;
+        stats.evictions += 1;
+      }
+
+      refreshCacheStats();
+      return reuse;
+    }
+
+    function storePart(partIndex, bytes) {
+      const expected = partLengths[partIndex];
+      if (bytes.byteLength !== expected) {
+        throw new Error(
+          'StabilityFS: part ' + (partIndex + 1) +
+          ' expected ' + expected + ' bytes, got ' + bytes.byteLength
+        );
+      }
+
+      const existing = cache.get(partIndex);
+      if (existing) {
+        return touchPart(partIndex, existing);
+      }
+
+      evictFor(bytes.byteLength);
+      const record = { bytes };
+      cache.set(partIndex, record);
+      residentBytes += bytes.byteLength;
+      refreshCacheStats();
+      return bytes;
+    }
+
+    async function bootstrapPart(partIndex) {
+      const cached = cache.get(partIndex);
+      if (cached) return touchPart(partIndex, cached);
+
+      evictFor(partLengths[partIndex]);
+      const result = await fetchBytes(
+        urls[partIndex], partLengths[partIndex], stats,
+        fallbackUrls[partIndex], partIndex === 0 ? bytes => {
+          validateMagic(bytes);
+          const headerEnd = new DataView(
+            bytes.buffer, bytes.byteOffset, bytes.byteLength
+          ).getUint32(MAGIC.length, true);
+          if (headerEnd < HEADER_PREFIX_SIZE || headerEnd > totalSize) {
+            throw new Error('StabilityFS: invalid header extent');
+          }
+          if (headerEnd <= bytes.byteLength) parseArchive(bytes, totalSize);
+        } : null, preferredUrls[partIndex]
+      );
+      preferredUrls[partIndex] = result.url;
+      return storePart(partIndex, result.bytes);
+    }
+
+    async function readArchiveHeader(firstPart) {
+      validateMagic(firstPart);
+
+      const headerEnd = new DataView(
+        firstPart.buffer,
+        firstPart.byteOffset,
+        firstPart.byteLength
+      ).getUint32(MAGIC.length, true);
+
+      if (headerEnd < HEADER_PREFIX_SIZE || headerEnd > totalSize) {
+        throw new Error('StabilityFS: invalid header extent');
+      }
+
+      if (headerEnd <= firstPart.byteLength) {
+        return firstPart.subarray(0, headerEnd);
+      }
+
+      const header = new Uint8Array(headerEnd);
+      let copied = 0;
+      let partIndex = 0;
+
+      while (copied < headerEnd) {
+        if (partIndex >= urls.length) {
+          throw new Error('StabilityFS: archive header exceeds data parts');
+        }
+
+        const part = await bootstrapPart(partIndex);
+        const count = Math.min(part.byteLength, headerEnd - copied);
+        header.set(part.subarray(0, count), copied);
+        copied += count;
+        partIndex += 1;
+      }
+
+      return header;
+    }
+
+    function markTouched(entry) {
+      if (!touchedFiles.has(entry.name)) {
+        touchedFiles.add(entry.name);
+        stats.loadedFiles = touchedFiles.size;
+      }
+      stats.lastFile = entry.name;
+    }
+
+    function getPart(partIndex) {
+      if (partIndex < 0 || partIndex >= urls.length) {
+        throw new Error('StabilityFS: data read outside physical part list');
+      }
+
+      const cached = cache.get(partIndex);
+      if (cached) {
+        stats.cacheHits += 1;
+        return touchPart(partIndex, cached);
+      }
+
+      stats.cacheMisses += 1;
+      if (demandedParts.has(partIndex)) {
+        stats.refetches += 1;
+      } else {
+        demandedParts.add(partIndex);
+        stats.uniqueParts = demandedParts.size;
+      }
+
+      const expected = partLengths[partIndex];
+      const reuse = evictFor(expected);
+
+      const activity = module.__hkAssetReadActivity;
+      try {
+        if (activity) activity(true, partIndex);
+        const result = syncWhole(
+          urls[partIndex], expected, stats, fallbackUrls[partIndex], reuse, preferredUrls[partIndex]
+        );
+        preferredUrls[partIndex] = result.url;
+        return storePart(partIndex, result.bytes);
+      } catch (error) {
+        stats.lastError = errorText(error);
+        throw error;
+      } finally {
+        if (activity) activity(false, partIndex);
+      }
+    }
+
+    function reportReadFailure(error, entry, operation, position, length) {
+      const previous = stats.lastFailure;
+      const detail = Object.assign({}, error && error.detail, {
+        kind: error && error.hkDataIO ? 'data-io' :
+          error && error.hkAllocationFailure ? 'allocation' : 'filesystem',
+        file: entry.name, operation, position, length,
+        message: errorText(error),
+        heapBytes: module.HEAPU8 ? module.HEAPU8.byteLength : null
+      });
+      stats.lastError = detail.message;
+      stats.lastFailure = detail;
+      if (!global.__hkLastReadFailure) global.__hkLastReadFailure = detail;
+      if (error && error.hkDataIO) stats.ioFailures += 1;
+      // Diagnostic hooks must never introduce another filesystem exception.
+      if (!previous || previous.message !== detail.message ||
+          previous.file !== detail.file || previous.position !== position) {
+        try { console.error('Hollow Knight data read failed:', detail); } catch (_) {}
+        try {
+          if (typeof settings.onReadError === 'function') settings.onReadError(detail);
+        } catch (_) {}
+      }
+      // Use this build's Linux errno values, not modern WASI's numbering.
+      // This is a failed read, NEVER fake EOF, zero-fill or a successful count.
+      if (error instanceof FS.ErrnoError) return error;
+      if (error && (error.hkDataIO || error.hkAllocationFailure)) {
+        const fsError = new FS.ErrnoError(error.hkDataIO ? 5 : 12);
+        fsError.message = detail.message;
+        return fsError;
+      }
+      // Preserve unexpected programming failures, with a serializable message
+      // so the old framework's JSON.stringify(error) no longer erases it.
+      try {
+        Object.defineProperty(error, 'message', {
+          value: detail.message, enumerable: true, configurable: true
+        });
+      } catch (_) {}
+      return error;
+    }
+
+    function readInto(entry, filePosition, length, target, targetOffset) {
+      if (!Number.isSafeInteger(filePosition) || filePosition < 0 ||
+          !Number.isSafeInteger(length) || length < 0 ||
+          !Number.isSafeInteger(targetOffset) || targetOffset < 0) {
+        throw new FS.ErrnoError(22);
+      }
+      if (length === 0 || filePosition >= entry.size) return 0;
+
+      let remaining = Math.min(length, entry.size - filePosition);
+      if (!target || typeof target.set !== 'function' ||
+          target.BYTES_PER_ELEMENT !== 1 ||
+          targetOffset > target.length || remaining > target.length - targetOffset) {
+        throw new FS.ErrnoError(14);
+      }
+      let archiveOffset = entry.offset + filePosition;
+      let destination = targetOffset;
+      let virtualPosition = filePosition;
+      let segmentIndex = entry.__hkSparseTextureOverlay ? textureOverlay.segmentAt(filePosition) : -1;
+
+      while (remaining > 0) {
+        let physicalOffset = archiveOffset, poolBase = 0, segmentLimit = remaining;
+        if (segmentIndex >= 0) {
+          const segment = textureOverlay.segments[segmentIndex];
+          const withinSegment = virtualPosition - segment[0];
+          physicalOffset = segment[3] + withinSegment;
+          poolBase = segment[2] === 1 ? originalPartCount : 0;
+          segmentLimit = Math.min(remaining, segment[1] - withinSegment);
+        }
+        const sourcePart = Math.floor(physicalOffset / partSize);
+        const partIndex = poolBase + sourcePart;
+        const offsetInPart = physicalOffset - sourcePart * partSize;
+        const part = getPart(partIndex);
+
+        if (offsetInPart < 0 || offsetInPart >= part.byteLength) {
+          throw new Error(
+            'StabilityFS: file points outside part ' + (partIndex + 1)
+          );
+        }
+
+        const count = Math.min(segmentLimit, part.byteLength - offsetInPart);
+        if (count <= 0) {
+          throw new Error('StabilityFS: invalid zero-length data read');
+        }
+
+        target.set(
+          part.subarray(offsetInPart, offsetInPart + count),
+          destination
+        );
+
+        archiveOffset += count;
+        virtualPosition += count;
+        if (segmentIndex >= 0) {
+          const segment = textureOverlay.segments[segmentIndex];
+          if (virtualPosition === segment[0] + segment[1]) segmentIndex += 1;
+        }
+        destination += count;
+        remaining -= count;
+      }
+
+      const read = destination - targetOffset;
+      markTouched(entry);
+      return read;
+    }
+
+    stats.phase = 'bootstrap';
+    setMessage('Reading Hollow Knight archive index…');
+
+    const firstPart = await bootstrapPart(0);
+    const header = await readArchiveHeader(firstPart);
+    const entries = parseArchive(header, totalSize);
+    if (textureOverlay) {
+      const matches = entries.filter(entry => entry.name === 'data.unity3d');
+      if (matches.length !== 1 || matches[0].offset !== textureOverlay.originalOffset ||
+          matches[0].size !== textureOverlay.originalSize) {
+        throw new Error('Texture overlay: original bundle identity differs');
+      }
+      matches[0].size = textureOverlay.size;
+      matches[0].__hkSparseTextureOverlay = true;
+    }
+    stats.totalFiles = entries.length;
+
+    stats.phase = 'mounting';
+    setMessage('Registering virtual game files…');
+
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      createDirectories(module, entry.name);
+
+      module.FS_createDataFile(
+        entry.name,
+        null,
+        new Uint8Array(0),
+        true,
+        true,
+        true
+      );
+
+      const node = FS.lookupPath(entry.name).node;
+      node.usedBytes = entry.size;
+      node.contents = null;
+      node.__hkReadOnlyAsset = true;
+
+      const baseOps = node.stream_ops;
+      const operations = Object.assign({}, baseOps, {
+        open() {
+          stats.opens += 1;
+          markTouched(entry);
+        },
+
+        close() {
+          stats.closes += 1;
+        },
+
+        read(stream, buffer, offset, length, position) {
+          stats.activeFile = entry.name;
+          stats.phase = 'read';
+          stats.readCalls += 1;
+
+          try {
+            const count = readInto(
+              entry,
+              position,
+              length,
+              buffer,
+              offset
+            );
+            stats.readBytes += count;
+            return count;
+          } catch (error) {
+            throw reportReadFailure(error, entry, 'read', position, length);
+          } finally {
+            stats.activeFile = '';
+          }
+        },
+
+        mmap(stream, buffer, address, length, position, prot, flags) {
+          stats.activeFile = entry.name;
+          stats.phase = 'mmap';
+          stats.mmapCalls += 1;
+          let pointer = 0;
+          try {
+            // Asset files are immutable. Private writable mappings are safe;
+            // a shared writable mapping cannot be synchronized back to them.
+            if ((prot & 2) && !(flags & 2)) throw new FS.ErrnoError(13);
+            if (!Number.isSafeInteger(length) || length <= 0 ||
+                !Number.isSafeInteger(position) || position < 0) {
+              throw new FS.ErrnoError(22);
+            }
+            pointer = module._malloc(length);
+            if (!pointer) {
+              const failure = new FS.ErrnoError(12);
+              failure.message = 'StabilityFS: WASM malloc failed while mapping ' + entry.name;
+              throw failure;
+            }
+            // _malloc can grow WASM memory and detach the caller's old view.
+            // Always acquire the current heap AFTER allocation.
+            const heap = module.HEAPU8;
+            if (!heap || pointer > heap.length || length > heap.length - pointer) {
+              throw new FS.ErrnoError(14);
+            }
+            const count = readInto(entry, position, length, heap, pointer);
+            // Zero only the legitimate mmap tail beyond the file's EOF.
+            // A transport failure throws before reaching this statement.
+            if (count < length) heap.fill(0, pointer + count, pointer + length);
+            stats.mmapBytes += length;
+            return { ptr: pointer, allocated: true };
+          } catch (error) {
+            if (pointer) module._free(pointer);
+            throw reportReadFailure(error, entry, 'mmap', position, length);
+          } finally {
+            stats.activeFile = '';
+          }
+        },
+
+        // Never inherit MEMFS write-back: lazy asset contents intentionally
+        // stay null. Shared read-only and private maps have nothing to flush.
+        msync() { return 0; },
+
+        write() {
+          stats.lastError =
+            'StabilityFS: unexpected write to read-only asset ' + entry.name;
+          throw new FS.ErrnoError(30);
+        }
+      });
+
+      operations.allocate = operations.write;
+      node.stream_ops = operations;
+
+      if (onProgress && (index % 20 === 0 || index + 1 === entries.length)) {
+        onProgress({
+          phase: 'mounting',
+          filesMounted: index + 1,
+          totalFiles: entries.length
+        });
+      }
+    }
+
+    stats.phase = 'ready';
+    refreshCacheStats();
+
+    if (onProgress) {
+      onProgress({
+        phase: 'complete',
+        filesMounted: entries.length,
+        totalFiles: entries.length
+      });
+    }
+
+    setMessage('Starting game…');
+  }
+
+  // Preserve the current save-flush behavior. This keeps IDBFS persistence
+  // independent from the read-only game-data cache.
+  function installHollowKnightPersistence(module) {
+    if (!module || module.__hkPersistenceInstalled) {
+      return Boolean(module && module.__hkPersistenceInstalled);
+    }
+
+    const FS = module.__FS;
+    if (!FS || !FS.trackingDelegate || typeof FS.syncfs !== 'function') {
+      return false;
+    }
+
+    const view = module.canvas && module.canvas.ownerDocument
+      ? module.canvas.ownerDocument.defaultView
+      : global;
+    const documentRef = view && view.document;
+    const previousWrite = FS.trackingDelegate.onWriteToFile;
+    const previousMove = FS.trackingDelegate.onMovePath;
+    const previousDelete = FS.trackingDelegate.onDeletePath;
+    const isPersistentPath = path =>
+      typeof path === 'string' &&
+      (path === '/idbfs' || path.indexOf('/idbfs/') === 0);
+
+    let dirty = false;
+    let inFlight = false;
+    let queued = false;
+    let timer = null;
+
+    const schedule = delay => {
+      if (timer) view.clearTimeout(timer);
+      timer = view.setTimeout(runSync, delay);
+    };
+
+    const runSync = () => {
+      timer = null;
+      if (!dirty) return;
+
+      if (inFlight) {
+        queued = true;
+        return;
+      }
+
+      inFlight = true;
+      queued = false;
+      dirty = false;
+
+      try {
+        FS.syncfs(false, error => {
+          inFlight = false;
+          if (error) dirty = true;
+          if (queued || dirty) schedule(error ? 2000 : 200);
+        });
+      } catch (_) {
+        inFlight = false;
+        dirty = true;
+        schedule(2000);
+      }
+    };
+
+    const markDirty = path => {
+      if (!isPersistentPath(path)) return;
+      dirty = true;
+      schedule(350);
+    };
+
+    FS.trackingDelegate.onWriteToFile = function (path) {
+      try {
+        if (typeof previousWrite === 'function') {
+          previousWrite.apply(this, arguments);
+        }
+      } catch (_) {}
+      markDirty(path);
+    };
+
+    FS.trackingDelegate.onMovePath = function (oldPath, newPath) {
+      try {
+        if (typeof previousMove === 'function') {
+          previousMove.apply(this, arguments);
+        }
+      } catch (_) {}
+      markDirty(oldPath);
+      markDirty(newPath);
+    };
+
+    FS.trackingDelegate.onDeletePath = function (path) {
+      try {
+        if (typeof previousDelete === 'function') {
+          previousDelete.apply(this, arguments);
+        }
+      } catch (_) {}
+      markDirty(path);
+    };
+
+    view.setInterval(() => {
+      if (dirty && !inFlight && !timer) schedule(0);
+    }, 2000);
+
+    const flush = () => {
+      // visibilitychange and pagehide often arrive together. Use the same
+      // serialized dirty/inFlight path as ordinary saves, not a second sync.
+      if (timer) view.clearTimeout(timer);
+      timer = null;
+      runSync();
+    };
+
+    view.addEventListener('pagehide', flush);
+    if (documentRef) {
+      documentRef.addEventListener('visibilitychange', () => {
+        if (documentRef.hidden) flush();
+      });
+    }
+
+    module.__hkPersistenceInstalled = true;
+    return true;
+  }
+
+  // Preserve the current cross-iframe keyboard focus/forwarding behavior.
+  function installHollowKnightKeyboardBridge(canvas) {
+    if (!canvas || canvas.__hkKeyboardBridgeInstalled) {
+      return Boolean(canvas && canvas.__hkKeyboardBridgeInstalled);
+    }
+
+    const gameDocument = canvas.ownerDocument;
+    const gameWindow = gameDocument && gameDocument.defaultView;
+    if (!gameWindow) return false;
+
+    canvas.tabIndex = 0;
+
+    const focusCanvas = () => {
+      try { gameWindow.focus(); } catch (_) {}
+      try {
+        canvas.focus({ preventScroll: true });
+      } catch (_) {
+        try { canvas.focus(); } catch (_) {}
+      }
+    };
+
+    const cloneKeyboardEvent = event => {
+      try {
+        return new gameWindow.KeyboardEvent(event.type, {
+          key: event.key,
+          code: event.code,
+          location: event.location,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+          repeat: event.repeat,
+          isComposing: event.isComposing,
+          bubbles: true,
+          cancelable: true
+        });
+      } catch (_) {
+        const forwarded = gameDocument.createEvent('Event');
+        forwarded.initEvent(event.type, true, true);
+        try {
+          Object.defineProperties(forwarded, {
+            key: { value: event.key },
+            code: { value: event.code },
+            keyCode: { value: event.keyCode },
+            which: { value: event.which },
+            ctrlKey: { value: event.ctrlKey },
+            shiftKey: { value: event.shiftKey },
+            altKey: { value: event.altKey },
+            metaKey: { value: event.metaKey },
+            repeat: { value: event.repeat }
+          });
+        } catch (_) {}
+        return forwarded;
+      }
+    };
+
+    const forwardKeyboard = event => {
+      if (
+        event.view === gameWindow ||
+        (event.target && event.target.ownerDocument === gameDocument)
+      ) {
+        return;
+      }
+
+      try {
+        gameDocument.dispatchEvent(cloneKeyboardEvent(event));
+        focusCanvas();
+
+        if (!(event.metaKey || event.ctrlKey || event.altKey)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      } catch (_) {}
+    };
+
+    const ancestorDocuments = [];
+    let currentWindow = gameWindow;
+
+    while (true) {
+      try {
+        const parentWindow = currentWindow.parent;
+        if (!parentWindow || parentWindow === currentWindow) break;
+        ancestorDocuments.push(parentWindow.document);
+        currentWindow = parentWindow;
+      } catch (_) {
+        break;
+      }
+    }
+
+    // Named handlers let permanent session teardown release ancestor references.
+    const visibleFocus = event => {
+      if (!event.currentTarget.hidden) gameWindow.setTimeout(focusCanvas, 0);
+    };
+    const scheduledFocus = () => gameWindow.setTimeout(focusCanvas, 0);
+    for (const documentRef of ancestorDocuments) {
+      documentRef.addEventListener('keydown', forwardKeyboard, true);
+      documentRef.addEventListener('keyup', forwardKeyboard, true);
+      documentRef.addEventListener('visibilitychange', visibleFocus);
+    }
+
+    for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
+      gameDocument.addEventListener(
+        type,
+        focusCanvas,
+        type === 'touchstart'
+          ? { capture: true, passive: true }
+          : true
+      );
+    }
+
+    gameDocument.addEventListener('visibilitychange', visibleFocus);
+    gameWindow.addEventListener('focus', scheduledFocus, true);
+
+    canvas.__hkKeyboardBridgeCleanup = () => {
+      for (const documentRef of ancestorDocuments) {
+        documentRef.removeEventListener('keydown', forwardKeyboard, true);
+        documentRef.removeEventListener('keyup', forwardKeyboard, true);
+        documentRef.removeEventListener('visibilitychange', visibleFocus);
+      }
+      for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
+        gameDocument.removeEventListener(type, focusCanvas, true);
+      }
+      gameDocument.removeEventListener('visibilitychange', visibleFocus);
+      gameWindow.removeEventListener('focus', scheduledFocus, true);
+      ancestorDocuments.length = 0;
+      delete canvas.__hkKeyboardBridgeCleanup;
+      delete canvas.__hkKeyboardBridgeInstalled;
+    };
+
+    canvas.__hkKeyboardBridgeInstalled = true;
+    focusCanvas();
+    return true;
+  }
+
+  global.mountUnityDataParts = mountUnityDataParts;
+  global.installHollowKnightPersistence = installHollowKnightPersistence;
+  global.installHollowKnightKeyboardBridge = installHollowKnightKeyboardBridge;
+})(window);
+
+// r4: coordinate the surviving Unity instance across browser suspension.
+// This does not recreate a lost GPU context or revive an OS-terminated page.
+(function (global) {
+  'use strict';
+  const VERSION = '2026.11.20-r17';
+  const AUDIO_WAIT_MS = 5000;
+
+  // Insert a narrow bridge inside the EXISTING framework closure. The on-disk
+  // framework and the WASM remain unchanged. Reject a different glue layout;
+  // never silently launch with missing lifecycle hooks.
+  global.prepareHollowKnightFramework = function (source) {
+    const entry = 'function unityFramework(Module) {';
+    const tick = '"suspended"===WEBAudio.audioContext.state?WEBAudio.audioContext.resume():Module.clearInterval(e)';
+    const resume = 'function _JS_Sound_ResumeIfNeeded(){0!=WEBAudio.audioWebEnabled&&"suspended"===WEBAudio.audioContext.state&&WEBAudio.audioContext.resume()}';
+    const ended = 'var o=this;this.source.onended=function(){e&&dynCall("vi",e,[i]),o.setup()}';
+    const setup = 'setup:function(){this.source=WEBAudio.audioContext.createBufferSource(),this.setupPanning()}';
+    const release = 'function _JS_Sound_ReleaseInstance(e){WEBAudio.audioInstances[e]=null}';
+    const stop = 'function _JS_Sound_Stop(e,i){if(0!=WEBAudio.audioWebEnabled){var n=WEBAudio.audioInstances[e];if(n.source.buffer){';
+    const growth = "function enlargeMemory(){var e=Module.usingWasm?WASM_PAGE_SIZE:ASMJS_PAGE_SIZE,i=2147483648-e;if(HEAP32[DYNAMICTOP_PTR>>2]>i)return!1;var n=TOTAL_MEMORY;for(TOTAL_MEMORY=Math.max(TOTAL_MEMORY,MIN_TOTAL_MEMORY);TOTAL_MEMORY<HEAP32[DYNAMICTOP_PTR>>2];)TOTAL_MEMORY=TOTAL_MEMORY<268435456?alignUp(2*TOTAL_MEMORY,e):Math.min(alignUp(TOTAL_MEMORY+67108864,e),i);var t=Module.reallocBuffer(TOTAL_MEMORY);return t&&t.byteLength==TOTAL_MEMORY?(updateGlobalBuffer(t),updateGlobalBufferViews(),!0):(TOTAL_MEMORY=n,!1)}";
+    const growthFixed = "function enlargeMemory(){var e=Module.usingWasm?WASM_PAGE_SIZE:ASMJS_PAGE_SIZE,i=2147483648-e;if(HEAP32[DYNAMICTOP_PTR>>2]>i)return!1;var n=TOTAL_MEMORY;for(TOTAL_MEMORY=Math.max(TOTAL_MEMORY,MIN_TOTAL_MEMORY);TOTAL_MEMORY<HEAP32[DYNAMICTOP_PTR>>2];)TOTAL_MEMORY=TOTAL_MEMORY<268435456?alignUp(2*TOTAL_MEMORY,e):Math.min(alignUp(TOTAL_MEMORY+67108864,e),i);if(Module.usingWasm&&Module.__hkMaxHeapGrowthSlack>0){TOTAL_MEMORY=Math.min(TOTAL_MEMORY,alignUp(HEAP32[DYNAMICTOP_PTR>>2],Module.__hkMaxHeapGrowthSlack));}var t=Module.reallocBuffer(TOTAL_MEMORY);if((!t||t.byteLength!==TOTAL_MEMORY)&&Module.usingWasm){var required=alignUp(HEAP32[DYNAMICTOP_PTR>>2],e);if(required>n&&required<TOTAL_MEMORY){var padded=TOTAL_MEMORY;TOTAL_MEMORY=required;t=Module.reallocBuffer(required);Module.__hkHeapGrowthRecovery={paddedBytes:padded,requiredBytes:required,recovered:Boolean(t&&t.byteLength===required)};if(Module.printErr)Module.printErr(\"Hollow Knight: padded WASM growth failed; minimum-size retry \"+(Module.__hkHeapGrowthRecovery.recovered?\"succeeded\":\"failed\")+\" (\"+required+\" bytes)\");}}return t&&t.byteLength==TOTAL_MEMORY?(updateGlobalBuffer(t),updateGlobalBufferViews(),!0):(TOTAL_MEMORY=n,!1)}";
+    // Writable MEMFS files must stay byte arrays; promoting them to generic
+    // JS number arrays multiplies their storage and slows every later write.
+    const expand = "expandFileStorage:function(e,i){if(e.contents&&e.contents.subarray&&i>e.contents.length&&(e.contents=MEMFS.getFileDataAsRegularArray(e),e.usedBytes=e.contents.length),!e.contents||e.contents.subarray){var n=e.contents?e.contents.length:0;if(n>=i)return;i=Math.max(i,n*(n<1048576?2:1.125)|0),0!=n&&(i=Math.max(i,256));var t=e.contents;return e.contents=new Uint8Array(i),void(e.usedBytes>0&&e.contents.set(t.subarray(0,e.usedBytes),0))}for(!e.contents&&i>0&&(e.contents=[]);e.contents.length<i;)e.contents.push(0)}";
+    const expandFixed = "expandFileStorage:function(e,i){\n  var n=e.contents?e.contents.length:0;\n  if(n>=i)return;\n  i=Math.max(i,Math.floor(n*(n<1048576?2:1.125)));\n  if(n)i=Math.max(i,256);\n  var t=e.contents,r=new Uint8Array(i);\n  if(e.usedBytes){\n    if(t.subarray)r.set(t.subarray(0,e.usedBytes));\n    else for(var o=0;o<e.usedBytes;o++)r[o]=t[o];\n  }\n  e.contents=r;\n}";
+    const deleteBuffers = "function _glDeleteBuffers(e,i){for(var n=0;n<e;n++){var t=HEAP32[i+4*n>>2],r=GL.buffers[t];r&&(GLctx.deleteBuffer(r),r.name=0,GL.buffers[t]=null,t==GL.currArrayBuffer&&(GL.currArrayBuffer=0),t==GL.currElementArrayBuffer&&(GL.currElementArrayBuffer=0))}}";
+    const deleteBuffersFixed = "function _glDeleteBuffers(e,i){\n  for(var n=0;n<e;n++){\n    var t=HEAP32[i+4*n>>2],r=GL.buffers[t];\n    if(!r)continue;\n    GLctx.deleteBuffer(r);\n    var mapped=GL.mappedBuffers[t];\n    if(mapped){\n      _free(mapped.mem);delete GL.mappedBuffers[t];\n      Module.__hkMemoryFixStats.deletedMappings++;\n      Module.__hkMemoryFixStats.deletedMappingBytes+=mapped.length;\n    }\n    r.name=0;GL.buffers[t]=null;\n    if(t===GL.currArrayBuffer)GL.currArrayBuffer=0;\n    if(t===GL.currElementArrayBuffer)GL.currElementArrayBuffer=0;\n    if(t===GLctx.currentPixelPackBufferBinding)GLctx.currentPixelPackBufferBinding=0;\n    if(t===GLctx.currentPixelUnpackBufferBinding)GLctx.currentPixelUnpackBufferBinding=0;\n  }\n}";
+    const unmapBuffer = "function _glUnmapBuffer(e){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glUnmapBuffer\"),0;var i=emscriptenWebGLGetBufferBinding(e),n=GL.mappedBuffers[i];return n?(GL.mappedBuffers[i]=null,16&n.access||(GL.currentContext.supportsWebGL2EntryPoints?GLctx.bufferSubData(e,n.offset,HEAPU8,n.mem,n.length):GLctx.bufferSubData(e,n.offset,HEAPU8.subarray(n.mem,n.mem+n.length))),_free(n.mem),1):(GL.recordError(1282),Module.printError(\"buffer was never mapped in glUnmapBuffer\"),0)}";
+    const unmapBufferFixed = "function _glUnmapBuffer(e){\n  if(!emscriptenWebGLValidateMapBufferTarget(e)){GL.recordError(1280);err(\"GL_INVALID_ENUM in glUnmapBuffer\");return 0;}\n  var binding=emscriptenWebGLGetBufferBinding(e),mapping=GL.mappedBuffers[binding];\n  if(!mapping){GL.recordError(1282);err(\"buffer was never mapped in glUnmapBuffer\");return 0;}\n  delete GL.mappedBuffers[binding];\n  try{\n    if(!(mapping.access&16)){\n      if(GL.currentContext.supportsWebGL2EntryPoints)GLctx.bufferSubData(e,mapping.offset,HEAPU8,mapping.mem,mapping.length);\n      else GLctx.bufferSubData(e,mapping.offset,HEAPU8.subarray(mapping.mem,mapping.mem+mapping.length));\n    }\n    return 1;\n  }catch(error){Module.__hkMemoryFixStats.uploadMappingsFreedOnError++;throw error;}\n  finally{_free(mapping.mem);}\n}";
+    // r16: reconstructed r15 explicit owner-release fixes; original package was unavailable.
+    const webRequestRelease = "function _JS_WebRequest_Release(e){var i=wr.requestInstances[e];i.onload=null,i.onerror=null,i.ontimeout=null,i.onabort=null,delete i,wr.requestInstances[e]=null}";
+    const webRequestReleaseFixed = "function _JS_WebRequest_Release(e){\n  var request=wr.requestInstances[e];\n  if(!request)return;\n  delete wr.requestInstances[e];\n  // abort() may synchronously dispatch events. Detach native-owner callbacks first.\n  request.onload=request.onerror=request.ontimeout=request.onabort=request.onprogress=null;\n  Module.__hkMemoryFixStats.webRequestsReleased++;\n  request.abort();\n}";
+    const videoDestroy = "function _JS_Video_Destroy(e){videoInstances[e].detached=!0,videoInstances[e]=null}";
+    const videoDestroyFixed = "function _JS_Video_Destroy(e){\n  var video=videoInstances[e];\n  if(!video)return;\n  video.detached=true;\n  videoInstances[e]=null;\n  Module.__hkMemoryFixStats.videoPlayersReleased++;\n  // Source URLs belong to callers. Reset this element without revoking their URLs.\n  try{video.pause();}\n  finally{video.removeAttribute(\"src\");video.load();}\n}";
+    const videoPlay = "function _JS_Video_Play(e){videoInstances[e].play()}";
+    const videoPlayFixed = "function _hkPlayVideo(video){\n  var pending=video.play();\n  if(pending&&typeof pending.catch===\"function\")pending.catch(function(error){\n    // Only our intentional destroyed-player reset is an expected cancellation.\n    if(video.detached&&error&&error.name===\"AbortError\")return;\n    throw error;\n  });\n}\nfunction _JS_Video_Play(e){_hkPlayVideo(videoInstances[e]);}";
+    const videoCreate = "function _JS_Video_Create(e){var i=Pointer_stringify(e),n=document.createElement(\"video\");return n.style.display=\"none\",n.src=i,n.detached=!1,n.muted=!0,n.crossOrigin=\"anonymous\",n.looping=!1,n.addEventListener(\"ended\",(function(e){n.looping&&!n.detached&&n.play()})),videoInstances.push(n)-1}";
+    const videoCreateFixed = "function _JS_Video_Create(e){var i=Pointer_stringify(e),n=document.createElement(\"video\");return n.style.display=\"none\",n.src=i,n.detached=!1,n.muted=!0,n.crossOrigin=\"anonymous\",n.looping=!1,n.addEventListener(\"ended\",(function(e){n.looping&&!n.detached&&_hkPlayVideo(n)})),videoInstances.push(n)-1}";
+    const mapBuffer = "function _glMapBufferRange(e,i,n,t){if(26!=t&&10!=t)return err(\"glMapBufferRange is only supported when access is MAP_WRITE|INVALIDATE_BUFFER\"),0;if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),err(\"GL_INVALID_ENUM in glMapBufferRange\"),0;var r=_malloc(n);return r?(GL.mappedBuffers[emscriptenWebGLGetBufferBinding(e)]={offset:i,length:n,mem:r,access:t},r):0}";
+    const mapBufferFixed = "function _glMapBufferRange(e,i,n,t){\n  if(26!==t&&10!==t){err(\"glMapBufferRange is only supported when access is MAP_WRITE|INVALIDATE_BUFFER\");return 0;}\n  if(!emscriptenWebGLValidateMapBufferTarget(e)){GL.recordError(1280);err(\"GL_INVALID_ENUM in glMapBufferRange\");return 0;}\n  if(i<0||n<0){GL.recordError(1281);err(\"invalid range in glMapBufferRange\");return 0;}\n  if(n===0){GL.recordError(1282);err(\"zero length in glMapBufferRange\");return 0;}\n  var binding=emscriptenWebGLGetBufferBinding(e);\n  if(!binding||GL.mappedBuffers[binding]){\n    GL.recordError(1282);Module.__hkMemoryFixStats.uploadMappingsRejected++;\n    err(\"buffer is unbound or already mapped in glMapBufferRange\");return 0;\n  }\n  var pointer=_malloc(n);\n  if(!pointer)return 0;\n  GL.mappedBuffers[binding]={offset:i,length:n,mem:pointer,access:t};\n  return pointer;\n}";
+    const flushMappedBuffer = "function _glFlushMappedBufferRange(e,i,n){if(!emscriptenWebGLValidateMapBufferTarget(e))return GL.recordError(1280),void err(\"GL_INVALID_ENUM in glFlushMappedBufferRange\");var t=GL.mappedBuffers[emscriptenWebGLGetBufferBinding(e)];return t?16&t.access?i<0||n<0||i+n>t.length?(GL.recordError(1281),void Module.printError(\"invalid range in glFlushMappedBufferRange\")):void GLctx.bufferSubData(e,t.offset,HEAPU8.subarray(t.mem+i,t.mem+i+n)):(GL.recordError(1282),void Module.printError(\"buffer was not mapped with GL_MAP_FLUSH_EXPLICIT_BIT in glFlushMappedBufferRange\")):(GL.recordError(1282),void Module.printError(\"buffer was never mapped in glFlushMappedBufferRange\"))}";
+    const flushMappedBufferFixed = "function _glFlushMappedBufferRange(e,i,n){\n  if(!emscriptenWebGLValidateMapBufferTarget(e)){GL.recordError(1280);err(\"GL_INVALID_ENUM in glFlushMappedBufferRange\");return;}\n  var mapping=GL.mappedBuffers[emscriptenWebGLGetBufferBinding(e)];\n  if(!mapping){GL.recordError(1282);err(\"buffer was never mapped in glFlushMappedBufferRange\");return;}\n  if(!(mapping.access&16)){GL.recordError(1282);err(\"buffer was not mapped with GL_MAP_FLUSH_EXPLICIT_BIT in glFlushMappedBufferRange\");return;}\n  if(i<0||n<0||i>mapping.length||n>mapping.length-i){GL.recordError(1281);err(\"invalid range in glFlushMappedBufferRange\");return;}\n  // WebGL2 interprets a zero source length as the remainder of the view.\n  // A native zero-length flush must upload nothing.\n  if(n===0)return;\n  if(GL.currentContext.supportsWebGL2EntryPoints)GLctx.bufferSubData(e,mapping.offset+i,HEAPU8,mapping.mem+i,n);\n  else GLctx.bufferSubData(e,mapping.offset+i,HEAPU8.subarray(mapping.mem+i,mapping.mem+i+n));\n}";
+    const msync = 'doMsync:function(e,i,n,t){var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}';
+    // r13: release no-longer-valid program locations without recycling IDs.
+    const uniformTable = "uniforms:[],shaders:[]";
+    const uniformPopulate = "populateUniformTable:function(e){var i=GL.programs[e];GL.programInfos[e]={uniforms:{},maxUniformLength:0,maxAttributeLength:-1,maxUniformBlockNameLength:-1};for(var n=GL.programInfos[e],t=n.uniforms,r=GLctx.getProgramParameter(i,GLctx.ACTIVE_UNIFORMS),o=0;o<r;++o){var _=GLctx.getActiveUniform(i,o),a=_.name;if(n.maxUniformLength=Math.max(n.maxUniformLength,a.length+1),-1!==a.indexOf(\"]\",a.length-1)){var l=a.lastIndexOf(\"[\");a=a.slice(0,l)}var u=GLctx.getUniformLocation(i,a);if(null!=u){var s=GL.getNewId(GL.uniforms);t[a]=[_.size,s],GL.uniforms[s]=u;for(var c=1;c<_.size;++c){var f=a+\"[\"+c+\"]\";u=GLctx.getUniformLocation(i,f),s=GL.getNewId(GL.uniforms),GL.uniforms[s]=u}}}}";
+    const programDelete = "function _glDeleteProgram(e){if(e){var i=GL.programs[e];i?(GLctx.deleteProgram(i),i.name=0,GL.programs[e]=null,GL.programInfos[e]=null):GL.recordError(1281)}}";
+    const programLink = "function _glLinkProgram(e){GLctx.linkProgram(GL.programs[e]),GL.programInfos[e]=null,GL.populateUniformTable(e)}";
+    const programUse = "function _glUseProgram(e){GLctx.useProgram(e?GL.programs[e]:null)}";
+    const contextDelete = "deleteContext:function(e){e&&(GL.currentContext===GL.contexts[e]&&(GL.currentContext=null),\"object\"==typeof JSEvents&&JSEvents.removeAllHandlersOnTarget(GL.contexts[e].GLctx.canvas),GL.contexts[e]&&GL.contexts[e].GLctx.canvas&&(GL.contexts[e].GLctx.canvas.GLctxObject=void 0),_free(GL.contexts[e]),GL.contexts[e]=null)}";
+    const objectId = 'getNewId:function(e){for(var i=GL.counter++,n=e.length;n<i;n++)e[n]=null;return i}';
+    // These tables use numeric lookups, not array iteration. The source-layout
+    // audit below rejects a build with array-method consumers before patching.
+    const objectTables = ['buffers', 'programs', 'framebuffers', 'renderbuffers',
+      'shaders', 'vaos', 'textures', 'queries', 'samplers', 'transformFeedbacks', 'syncs'];
+    for (const name of objectTables) {
+      const marker = ',' + name + ':[]';
+      if (source.indexOf(marker) < 0 || source.indexOf(marker) !== source.lastIndexOf(marker) ||
+          new RegExp('GL\\.' + name + '\\s*\\.').test(source)) {
+        throw new Error('Unexpected Unity graphics table layout; runtime patches were not applied.');
+      }
+    }
+    const unmapCleanup = "SYSCALLS.mappings[n]=null,r.allocated&&_free(r.malloc)";
+    const registryReplacements = {
+  "uniformTable": "uniforms:Object.create(null),shaders:[]",
+  "uniformPopulate": "releaseProgramUniforms:function(info){\n  if(!info)return;\n  for(var name in info.uniforms){\n    var range=info.uniforms[name];\n    for(var j=0;j<range[0];j++){\n      delete GL.uniforms[range[1]+j];\n      Module.__hkMemoryFixStats.uniformLocationsReleased++;\n    }\n  }\n},populateUniformTable:function(e){var i=GL.programs[e];GL.programInfos[e]={uniforms:{},maxUniformLength:0,maxAttributeLength:-1,maxUniformBlockNameLength:-1};for(var n=GL.programInfos[e],t=n.uniforms,r=GLctx.getProgramParameter(i,GLctx.ACTIVE_UNIFORMS),o=0;o<r;++o){var _=GLctx.getActiveUniform(i,o),a=_.name;if(n.maxUniformLength=Math.max(n.maxUniformLength,a.length+1),-1!==a.indexOf(\"]\",a.length-1)){var l=a.lastIndexOf(\"[\");a=a.slice(0,l)}var u=GLctx.getUniformLocation(i,a);if(null!=u){var s=GL.counter++;t[a]=[_.size,s],GL.uniforms[s]=u;for(var c=1;c<_.size;++c){var f=a+\"[\"+c+\"]\";u=GLctx.getUniformLocation(i,f),s=GL.counter++,GL.uniforms[s]=u}}}}",
+  "programLink": "function _glLinkProgram(e){\n  GLctx.linkProgram(GL.programs[e]);\n  GL.releaseProgramUniforms(GL.programInfos[e]);\n  GL.programInfos[e]=null;GL.populateUniformTable(e);\n}",
+  "programDelete": "function _glDeleteProgram(e){\n  if(!e)return;\n  var p=GL.programs[e];\n  if(!p){GL.recordError(1281);return;}\n  GLctx.deleteProgram(p);\n  var info=GL.programInfos[e];\n  // A deleted CURRENT program can still draw/use existing locations until a\n  // successful switch. Retain only that one set per context until then.\n  if(GLctx.getParameter(35725)===p){\n    GL.currentContext.__hkDeletedUniforms={program:p,info:info};\n  }else GL.releaseProgramUniforms(info);\n  p.name=0;GL.programs[e]=null;GL.programInfos[e]=null;\n}",
+  "programUse": "function _glUseProgram(e){\n  GLctx.useProgram(e?GL.programs[e]:null);\n  var context=GL.currentContext,pending=context&&context.__hkDeletedUniforms;\n  // Query only in the exceptional delete-while-bound state. A failed switch\n  // must not destroy locations still used by the current executable.\n  if(pending&&GLctx.getParameter(35725)!==pending.program){\n    GL.releaseProgramUniforms(pending.info);delete context.__hkDeletedUniforms;\n  }\n}",
+  "contextDelete": "deleteContext:function(e){\n  if(!e)return;\n  var context=GL.contexts[e];\n  if(context.__hkDeletedUniforms){\n    GL.releaseProgramUniforms(context.__hkDeletedUniforms.info);\n    delete context.__hkDeletedUniforms;\n  }\n  if(GL.currentContext===context)GL.currentContext=null;\n  if(typeof JSEvents===\"object\")JSEvents.removeAllHandlersOnTarget(context.GLctx.canvas);\n  if(context.GLctx.canvas)context.GLctx.canvas.GLctxObject=void 0;\n  _free(e);GL.contexts[e]=null;\n}",
+  "unmapCleanup": "delete SYSCALLS.mappings[n],r.allocated&&_free(r.malloc)"
+};
+    for (const marker of [entry, tick, resume, ended, msync, setup, release, stop, growth, expand, deleteBuffers, unmapBuffer, uniformTable, uniformPopulate, programDelete, programLink, programUse, contextDelete, unmapCleanup, objectId, webRequestRelease, videoDestroy, videoPlay, videoCreate, mapBuffer, flushMappedBuffer]) {
+      if (source.indexOf(marker) === -1 || source.indexOf(marker) !== source.lastIndexOf(marker)) {
+        throw new Error('Unexpected Unity framework layout; runtime patches were not applied.');
+      }
+    }
+    const bridge = '\nModule.__hkMemoryFixStats={deletedMappings:0,deletedMappingBytes:0,uniformLocationsReleased:0,unmapCopiesAvoided:0,unmapCopyBytesAvoided:0,webRequestsReleased:0,videoPlayersReleased:0,uploadMappingsRejected:0,uploadMappingsFreedOnError:0};Module.__hkRuntime = {' +
+      'version:"' + VERSION + '",' +
+      'get loop(){return Browser.mainLoop;},' +
+      'get audio(){return WEBAudio.audioWebEnabled ? WEBAudio.audioContext : null;},' +
+      'get aborted(){return Boolean(ABORT);},' +
+      'get callbacksAllowed(){return Browser.allowAsyncCallbacks;},' +
+      'get contextRestoreRegistered(){' +
+        'for(var i=0;i<JSEvents.eventHandlers.length;i++){' +
+          'var h=JSEvents.eventHandlers[i];' +
+          'if(h.target===Module.canvas && h.eventTypeString==="webglcontextrestored" && h.callbackfunc)return true;' +
+        '}return false;' +
+      '},' +
+      'pauseCallbacks:function(){Browser.pauseAsyncCallbacks();},' +
+      'resumeCallbacks:function(){' +
+        'Browser.allowAsyncCallbacks=true;' +
+        'var q=Browser.queuedAsyncCallbacks,i=0;Browser.queuedAsyncCallbacks=[];' +
+        'try{while(i<q.length && Browser.allowAsyncCallbacks && !Module.__hkLifecycle.state.paused && !ABORT){q[i++]();}}' +
+        'finally{if(i<q.length)Browser.queuedAsyncCallbacks=q.slice(i).concat(Browser.queuedAsyncCallbacks);}' +
+      '},' +
+      'audioEnded:function(fn){' +
+        'if(Module.__hkLifecycle.state.paused || !Browser.allowAsyncCallbacks)Browser.queuedAsyncCallbacks.push(fn);else fn();' +
+      '}' +
+      '};\n';
+    // The legacy unmap syscall stages a full JS copy even for private maps.
+    // No backing file and private/immutable maps cannot need write-back.
+    // Keep the original snapshot for ordinary shared writable mappings.
+    let patched = source
+      .replace(webRequestRelease,webRequestReleaseFixed)
+      .replace(videoDestroy,videoDestroyFixed)
+      .replace(videoPlay,videoPlayFixed)
+      .replace(videoCreate,videoCreateFixed)
+      .replace(mapBuffer,mapBufferFixed)
+      .replace(flushMappedBuffer,flushMappedBufferFixed)
+      .replace(uniformTable, registryReplacements.uniformTable)
+      .replace(uniformPopulate, registryReplacements.uniformPopulate)
+      .replace(programDelete, registryReplacements.programDelete)
+      .replace(programLink, registryReplacements.programLink)
+      .replace(programUse, registryReplacements.programUse)
+      .replace(contextDelete, registryReplacements.contextDelete)
+      .replace(unmapCleanup, registryReplacements.unmapCleanup)
+      .replace(expand, expandFixed)
+      .replace(deleteBuffers, deleteBuffersFixed).replace(unmapBuffer, unmapBufferFixed)
+      .replace(growth, growthFixed).replace(msync,
+      "doMsync:function(e,i,n,t){if(!i||(t&2)||i.node.__hkReadOnlyAsset){Module.__hkMemoryFixStats.unmapCopiesAvoided++;Module.__hkMemoryFixStats.unmapCopyBytesAvoided+=n;return;}var r=new Uint8Array(HEAPU8.subarray(e,e+n));FS.msync(i,r,0,n,t)}")
+      .replace(entry, entry + bridge)
+      .replace(tick, 'Module.__hkLifecycle.audioTick(e)')
+      .replace(resume, 'function _JS_Sound_ResumeIfNeeded(){Module.__hkLifecycle.requestAudioResume()}')
+      .replace(ended,
+        'var o=this,s=this.source;this.source.onended=function(){' +
+          's.__hkEnded=true;s.onended=null;s.disconnect();s.buffer=null;' +
+          'Module.__hkRuntime.audioEnded(function(){' +
+            'if(o.__hkReleased||o.source!==s)return;' +
+            'e&&dynCall("vi",e,[i]);' +
+            'if(!o.__hkReleased&&o.source===s)o.setup();' +
+          '});' +
+        '}')
+      .replace(stop, stop.replace('if(n.source.buffer)', 'if(n.source.buffer||n.source.__hkEnded)'))
+      .replace(setup,
+        'setup:function(){' +
+          'if(this.source){this.source.onended=null;this.source.disconnect();this.source.buffer=null;}' +
+          'this.source=WEBAudio.audioContext.createBufferSource();this.setupPanning();' +
+        '}')
+      .replace(release,
+        'function _JS_Sound_ReleaseInstance(e){' +
+          'var n=WEBAudio.audioInstances[e];WEBAudio.audioInstances[e]=null;' +
+          'if(!n)return;n.__hkReleased=true;' +
+          'if(n.source){' +
+            'var s=n.source;n.source=null;s.onended=null;' +
+            'try{s.stop(0);}catch(error){if(error.name!=="InvalidStateError")throw error;}' +
+            's.disconnect();s.buffer=null;n.panner.disconnect();n.gain.disconnect();' +
+          '}' +
+          'n.buffer=null;' +
+        '}');
+    patched = patched.replace(objectId, 'getNewId:function(){return GL.counter++}');
+    for (const name of objectTables) {
+      patched = patched.replace(',' + name + ':[]', ',' + name + ':Object.create(null)');
+    }
+    // Released entries only. No ID reuse, live-object eviction, per-frame scan,
+    // added graphics queries, or changes to the actual native delete calls.
+    patched = patched.replace(/GL\.(buffers|programs|framebuffers|renderbuffers|shaders|vaos|textures|queries|samplers|transformFeedbacks|syncs|programInfos)\[([^\]]+)\]=null/g,
+      'delete GL.$1[$2]');
+    // r16: retain only owned audio handles; reject late decoded ownership.
+    const audioMemoryReplacements = [["var WEBAudio={audioInstances:[],audioContext:{},audioWebEnabled:0};", "var WEBAudio={audioInstances:Object.create(null),nextAudioId:0,audioContext:{},audioWebEnabled:0,pendingDecodes:0,pendingEncodedBytes:0,discardedDecodedResults:0,addAudioInstance:function(value){var id=this.nextAudioId++;this.audioInstances[id]=value;return id;}};\n// A requested snapshot only: no polling, getChannelData(), or retained buffers.\n// Includes a playing source after its clip handle is released, once per buffer.\nModule.__hkAudioMemorySnapshot=function(){\n  var seen=new WeakSet(),handles=0,clips=0,channels=0,buffers=0,bytes=0;\n  function count(buffer){\n    if(!buffer||seen.has(buffer))return;\n    seen.add(buffer);buffers++;\n    bytes+=buffer.length*buffer.numberOfChannels*4;\n  }\n  for(var id in WEBAudio.audioInstances){\n    var value=WEBAudio.audioInstances[id];\n    if(!value||value.__hkReleased)continue;\n    handles++;\n    if(value.source){channels++;count(value.source.buffer);}\n    else{clips++;count(value.buffer);}\n  }\n  return {scope:\"JS-owned AudioBuffer PCM payload; excludes decoder and driver copies\",liveHandles:handles,clipHandles:clips,channelHandles:channels,uniqueDecodedBuffers:buffers,decodedPCMBytes:bytes,pendingDecodes:WEBAudio.pendingDecodes,pendingEncodedAudioBytes:WEBAudio.pendingEncodedBytes,discardedDecodeResults:WEBAudio.discardedDecodedResults,nextAudioHandle:WEBAudio.nextAudioId};\n};"], ["function _JS_Sound_Load(e,i){if(0==WEBAudio.audioWebEnabled)return 0;var n={buffer:null,error:!1},t=WEBAudio.audioInstances.push(n)-1,r=HEAPU8.buffer.slice(e,e+i);return WEBAudio.audioContext.decodeAudioData(r,(function(e){n.buffer=e}),(function(){n.error=!0,console.log(\"Decode error.\")})),t}", "function _JS_Sound_Load(e,i){\n  if(0==WEBAudio.audioWebEnabled)return 0;\n  // decodeAudioData detaches its input. This copy must not alias the WASM heap.\n  var data=HEAPU8.buffer.slice(e,e+i),owner={buffer:null,error:false};\n  var id=WEBAudio.addAudioInstance(owner),settled=false;\n  WEBAudio.pendingDecodes++;WEBAudio.pendingEncodedBytes+=i;\n  function finish(){\n    if(settled)return null;\n    settled=true;WEBAudio.pendingDecodes--;WEBAudio.pendingEncodedBytes-=i;\n    var value=owner;owner=null;\n    return value;\n  }\n  function success(buffer){\n    if(settled)return;\n    var value=finish();\n    if(value&&!value.__hkReleased&&WEBAudio.audioInstances[id]===value)value.buffer=buffer;\n    else WEBAudio.discardedDecodedResults++;\n  }\n  function failure(){\n    if(settled)return;\n    var value=finish();\n    if(value&&!value.__hkReleased&&WEBAudio.audioInstances[id]===value){\n      value.error=true;console.log(\"Decode error.\");\n    }\n  }\n  try{\n    var task=WEBAudio.audioContext.decodeAudioData(data,success,failure);\n    data=null;\n    // Modern implementations also reject a Promise when invoking failure.\n    // Account/report once through the existing native error-state contract.\n    if(task&&typeof task.catch===\"function\")task.catch(failure);\n  }catch(error){\n    finish();delete WEBAudio.audioInstances[id];throw error;\n  }\n  return id;\n}"], ["WEBAudio.audioInstances.push(n)-1", "WEBAudio.addAudioInstance(n)"], ["WEBAudio.audioInstances.push(r)-1", "WEBAudio.addAudioInstance(r)"], ["var n=WEBAudio.audioInstances[e];WEBAudio.audioInstances[e]=null;", "var n=WEBAudio.audioInstances[e];delete WEBAudio.audioInstances[e];"]];
+    for (const [before, after] of audioMemoryReplacements) {
+      if (patched.indexOf(before) < 0 || patched.indexOf(before) !== patched.lastIndexOf(before)) {
+        throw new Error('Unexpected Unity audio ownership layout; runtime patches were not applied.');
+      }
+      patched = patched.replace(before, after);
+    }
+    // This table was private to generated glue. Refuse added array consumers.
+    if (/WEBAudio\.audioInstances\s*\./.test(patched)) {
+      throw new Error('Unexpected Unity audio table consumer; runtime patches were not applied.');
+    }
+    // r17: native playback clock, lower-rate compressed decode, optional bounded admission.
+    const audio17MemoryReplacements = [["var WEBAudio={audioInstances:Object.create(null),nextAudioId:0,audioContext:{},audioWebEnabled:0,pendingDecodes:0,pendingEncodedBytes:0,discardedDecodedResults:0,addAudioInstance:function(value){var id=this.nextAudioId++;this.audioInstances[id]=value;return id;}};\n// A requested snapshot only: no polling, getChannelData(), or retained buffers.\n// Includes a playing source after its clip handle is released, once per buffer.\nModule.__hkAudioMemorySnapshot=function(){\n  var seen=new WeakSet(),handles=0,clips=0,channels=0,buffers=0,bytes=0;\n  function count(buffer){\n    if(!buffer||seen.has(buffer))return;\n    seen.add(buffer);buffers++;\n    bytes+=buffer.length*buffer.numberOfChannels*4;\n  }\n  for(var id in WEBAudio.audioInstances){\n    var value=WEBAudio.audioInstances[id];\n    if(!value||value.__hkReleased)continue;\n    handles++;\n    if(value.source){channels++;count(value.source.buffer);}\n    else{clips++;count(value.buffer);}\n  }\n  return {scope:\"JS-owned AudioBuffer PCM payload; excludes decoder and driver copies\",liveHandles:handles,clipHandles:clips,channelHandles:channels,uniqueDecodedBuffers:buffers,decodedPCMBytes:bytes,pendingDecodes:WEBAudio.pendingDecodes,pendingEncodedAudioBytes:WEBAudio.pendingEncodedBytes,discardedDecodeResults:WEBAudio.discardedDecodedResults,nextAudioHandle:WEBAudio.nextAudioId};\n};", "var WEBAudio={audioInstances:Object.create(null),nextAudioId:0,audioContext:{},audioWebEnabled:0,decodeContext:null,requestedDecodeSampleRate:32000,decodeFallbackReason:\"\",pendingDecodes:0,pendingEncodedBytes:0,discardedDecodedResults:0,activeDecodes:0,queuedDecodes:0,queuedEncodedBytes:0,maxConcurrentDecodes:0,peakActiveDecodes:0,cancelledQueuedDecodes:0,decodeQueueHead:null,decodeQueueTail:null,decodePumpRunning:false,retired:false,audioResumeTimer:0,compressedBuffers:new WeakSet(),addAudioInstance:function(value){var id=this.nextAudioId++;this.audioInstances[id]=value;return id;},cancelDecode:function(owner){_hkAudioCancelDecode(owner);}};\n\nfunction _hkAudioRemoveQueued(job){\n  if(!job.queued)return;\n  if(job.previous)job.previous.next=job.next;else WEBAudio.decodeQueueHead=job.next;\n  if(job.next)job.next.previous=job.previous;else WEBAudio.decodeQueueTail=job.previous;\n  job.previous=null;job.next=null;job.queued=false;\n  WEBAudio.queuedDecodes--;WEBAudio.queuedEncodedBytes-=job.bytes;\n}\n\nfunction _hkAudioFinishDecode(job,failed,buffer){\n  if(job.settled)return;\n  job.settled=true;\n  if(job.active){job.active=false;WEBAudio.activeDecodes--;}\n  _hkAudioRemoveQueued(job);\n  WEBAudio.pendingDecodes--;WEBAudio.pendingEncodedBytes-=job.bytes;\n  var owner=job.owner;job.owner=null;job.data=null;\n  var owned=owner&&!owner.__hkReleased&&WEBAudio.audioInstances[job.id]===owner;\n  if(owner)owner.__hkDecodeJob=null;\n  if(failed){\n    if(owned){owner.error=true;console.log(\"Decode error.\");}\n  }else if(buffer){\n    if(owned){WEBAudio.compressedBuffers.add(buffer);owner.buffer=buffer;}\n    else WEBAudio.discardedDecodedResults++;\n  }\n  _hkAudioPumpDecodes();\n}\n\nfunction _hkAudioPumpDecodes(){\n  if(WEBAudio.retired||WEBAudio.decodePumpRunning)return;\n  WEBAudio.decodePumpRunning=true;\n  try{\n    while((!WEBAudio.maxConcurrentDecodes||WEBAudio.activeDecodes<WEBAudio.maxConcurrentDecodes)&&WEBAudio.decodeQueueHead){\n      var job=WEBAudio.decodeQueueHead;\n      _hkAudioRemoveQueued(job);\n      job.active=true;WEBAudio.activeDecodes++;\n      WEBAudio.peakActiveDecodes=Math.max(WEBAudio.peakActiveDecodes,WEBAudio.activeDecodes);\n      _hkAudioStartDecode(job);\n    }\n  }finally{WEBAudio.decodePumpRunning=false;}\n}\n\nfunction _hkAudioStartDecode(job){\n  var data=job.data;job.data=null;\n  function success(buffer){_hkAudioFinishDecode(job,false,buffer);}\n  function failure(){_hkAudioFinishDecode(job,true,null);}\n  try{\n    var decoder=WEBAudio.decodeContext||WEBAudio.audioContext;\n    var task=decoder.decodeAudioData(data,success,failure);\n    data=null;\n    // Older WebKit uses callbacks. Modern implementations may also reject a\n    // Promise; a single settlement protects ownership and queue accounting.\n    if(task&&typeof task.catch===\"function\")task.catch(failure);\n  }catch(error){\n    data=null;job.setupError=error;failure();\n  }\n}\n\nfunction _hkAudioCancelDecode(owner){\n  var job=owner.__hkDecodeJob;\n  if(!job||job.settled)return;\n  owner.__hkDecodeJob=null;job.owner=null;\n  // A native decode already running cannot be cancelled. Its late result is\n  // discarded; queued encoded bytes can be released immediately.\n  if(job.queued){\n    WEBAudio.cancelledQueuedDecodes++;\n    _hkAudioFinishDecode(job,false,null);\n  }\n}\n\n// Permanent lifecycle teardown only. Temporary hide/suspend keeps the graph.\nModule.__hkAudioRetire=function(){\n  if(WEBAudio.retired)return;\n  WEBAudio.retired=true;WEBAudio.audioWebEnabled=0;\n  if(WEBAudio.audioResumeTimer&&typeof Module.clearInterval===\"function\")Module.clearInterval(WEBAudio.audioResumeTimer);\n  WEBAudio.audioResumeTimer=0;\n  for(var id in WEBAudio.audioInstances){\n    var owner=WEBAudio.audioInstances[id];\n    try{_JS_Sound_ReleaseInstance(id);}\n    catch(error){\n      // Complete ownership cleanup even if a browser node rejects stop(). The\n      // surrounding lifecycle then closes the real-time context separately.\n      if(owner){owner.__hkReleased=true;_hkAudioCancelDecode(owner);owner.buffer=null;}\n      delete WEBAudio.audioInstances[id];\n      console.error(\"Audio instance cleanup failed.\");\n    }\n  }\n  WEBAudio.decodeContext=null;\n  WEBAudio.compressedBuffers=new WeakSet();\n};\n\n// Requested snapshots only: no timer, PCM reads, retained history, or copies.\n// Playing sources count even after their clip handle is released.\nModule.__hkAudioMemorySnapshot=function(){\n  var seen=new WeakSet(),handles=0,clips=0,channels=0,buffers=0,bytes=0,compressedBytes=0,pcmBytes=0,originalEstimate=0;\n  var playbackRate=WEBAudio.audioContext.sampleRate||0;\n  function count(buffer){\n    if(!buffer||seen.has(buffer))return;\n    seen.add(buffer);buffers++;\n    var size=buffer.length*buffer.numberOfChannels*4;\n    bytes+=size;\n    if(WEBAudio.compressedBuffers.has(buffer)){\n      compressedBytes+=size;\n      // A counterfactual PCM payload at the original playback decoder's rate,\n      // not measured savings or browser resident memory. Rounding is estimated.\n      if(playbackRate&&buffer.sampleRate)originalEstimate+=Math.round(buffer.length*playbackRate/buffer.sampleRate)*buffer.numberOfChannels*4;\n    }else pcmBytes+=size;\n  }\n  for(var id in WEBAudio.audioInstances){\n    var value=WEBAudio.audioInstances[id];\n    if(!value||value.__hkReleased)continue;\n    handles++;\n    if(value.source){channels++;count(value.source.buffer);}\n    else{clips++;count(value.buffer);}\n  }\n  var decoder=WEBAudio.decodeContext||WEBAudio.audioContext;\n  return {scope:\"JS-owned AudioBuffer PCM payload; excludes decoder and driver copies\",liveHandles:handles,clipHandles:clips,channelHandles:channels,uniqueDecodedBuffers:buffers,decodedPCMBytes:bytes,decodedCompressedPCMBytes:compressedBytes,importedPCMBytes:pcmBytes,estimatedCompressedPCMBytesAtPlaybackRate:originalEstimate,estimatedCompressedPCMSavingsAtPlaybackRate:Math.max(0,originalEstimate-compressedBytes),pendingDecodes:WEBAudio.pendingDecodes,pendingEncodedAudioBytes:WEBAudio.pendingEncodedBytes,discardedDecodeResults:WEBAudio.discardedDecodedResults,nextAudioHandle:WEBAudio.nextAudioId,activeDecodes:WEBAudio.activeDecodes,queuedDecodes:WEBAudio.queuedDecodes,queuedEncodedAudioBytes:WEBAudio.queuedEncodedBytes,decodeConcurrencyLimit:WEBAudio.maxConcurrentDecodes,peakActiveDecodes:WEBAudio.peakActiveDecodes,cancelledQueuedDecodes:WEBAudio.cancelledQueuedDecodes,requestedDecodeSampleRate:WEBAudio.requestedDecodeSampleRate,decodeSampleRate:WEBAudio.retired?0:decoder.sampleRate||0,playbackSampleRate:playbackRate,decodeFallbackReason:WEBAudio.decodeFallbackReason,audioRetired:WEBAudio.retired?1:0};\n};"], ["function _JS_Sound_Init(){try{window.AudioContext=window.AudioContext||window.webkitAudioContext,WEBAudio.audioContext=new AudioContext;var e=Module.setInterval((function(){Module.__hkLifecycle.audioTick(e)}),400);WEBAudio.audioWebEnabled=1}catch(e){alert(\"Web Audio API is not supported in this browser\")}}", "function _JS_Sound_Init(){\n  if(WEBAudio.retired||WEBAudio.audioWebEnabled)return;\n  try{\n    window.AudioContext=window.AudioContext||window.webkitAudioContext;\n    // Keep the real-time clock, hardware rate, and output scheduling unchanged.\n    WEBAudio.audioContext=new AudioContext;\n    WEBAudio.decodeContext=WEBAudio.audioContext;\n    var rate=Module.__hkAudioDecodeSampleRate;\n    if(rate!==0&&rate!==24000&&rate!==32000)rate=32000;\n    WEBAudio.requestedDecodeSampleRate=rate;\n    // Keep original immediate admission by default. Two requests at a time is\n    // an explicit experiment: queued loads can change readiness and memory mix.\n    WEBAudio.maxConcurrentDecodes=Module.__hkAudioDecodeConcurrency===2?2:0;\n    WEBAudio.decodeFallbackReason=\"\";\n    if(rate&&WEBAudio.audioContext.sampleRate<=rate){\n      // Do not upsample unusual low-rate hardware or create a redundant decoder.\n      WEBAudio.decodeFallbackReason=\"Playback sample rate already at or below decode target\";\n    }else if(rate){\n      var Offline=window.OfflineAudioContext||window.webkitOfflineAudioContext;\n      if(typeof Offline!==\"function\"){\n        WEBAudio.decodeFallbackReason=\"OfflineAudioContext unavailable; using playback decoder\";\n      }else{\n        try{\n          // No offline rendering is started. decodeAudioData resamples to this\n          // context's rate before returning an AudioBuffer; the one-frame\n          // constructor buffer is not the soundtrack or an output clock.\n          var decoder=new Offline(1,1,rate);\n          if(typeof decoder.decodeAudioData!==\"function\"||decoder.sampleRate!==rate)throw new Error(\"Offline decode unavailable\");\n          WEBAudio.decodeContext=decoder;\n        }catch(error){\n          WEBAudio.decodeFallbackReason=\"OfflineAudioContext creation failed; using playback decoder\";\n        }\n      }\n    }\n    var e=Module.setInterval(function(){Module.__hkLifecycle.audioTick(e)},400);\n    WEBAudio.audioResumeTimer=e;\n    WEBAudio.audioWebEnabled=1;\n  }catch(error){alert(\"Web Audio API is not supported in this browser\");}\n}"], ["function _JS_Sound_Load(e,i){\n  if(0==WEBAudio.audioWebEnabled)return 0;\n  // decodeAudioData detaches its input. This copy must not alias the WASM heap.\n  var data=HEAPU8.buffer.slice(e,e+i),owner={buffer:null,error:false};\n  var id=WEBAudio.addAudioInstance(owner),settled=false;\n  WEBAudio.pendingDecodes++;WEBAudio.pendingEncodedBytes+=i;\n  function finish(){\n    if(settled)return null;\n    settled=true;WEBAudio.pendingDecodes--;WEBAudio.pendingEncodedBytes-=i;\n    var value=owner;owner=null;\n    return value;\n  }\n  function success(buffer){\n    if(settled)return;\n    var value=finish();\n    if(value&&!value.__hkReleased&&WEBAudio.audioInstances[id]===value)value.buffer=buffer;\n    else WEBAudio.discardedDecodedResults++;\n  }\n  function failure(){\n    if(settled)return;\n    var value=finish();\n    if(value&&!value.__hkReleased&&WEBAudio.audioInstances[id]===value){\n      value.error=true;console.log(\"Decode error.\");\n    }\n  }\n  try{\n    var task=WEBAudio.audioContext.decodeAudioData(data,success,failure);\n    data=null;\n    // Modern implementations also reject a Promise when invoking failure.\n    // Account/report once through the existing native error-state contract.\n    if(task&&typeof task.catch===\"function\")task.catch(failure);\n  }catch(error){\n    finish();delete WEBAudio.audioInstances[id];throw error;\n  }\n  return id;\n}", "function _JS_Sound_Load(e,i){\n  if(0==WEBAudio.audioWebEnabled)return 0;\n  // Unity may reuse its source memory after return, and decodeAudioData detaches\n  // its input. A queued job therefore owns one encoded copy, never a heap view.\n  var data=HEAPU8.buffer.slice(e,e+i),owner={buffer:null,error:false};\n  var id=WEBAudio.addAudioInstance(owner);\n  var job={id:id,owner:owner,bytes:i,data:data,previous:WEBAudio.decodeQueueTail,next:null,queued:true,active:false,settled:false,setupError:null};\n  data=null;owner.__hkDecodeJob=job;\n  if(WEBAudio.decodeQueueTail)WEBAudio.decodeQueueTail.next=job;else WEBAudio.decodeQueueHead=job;\n  WEBAudio.decodeQueueTail=job;\n  WEBAudio.queuedDecodes++;WEBAudio.queuedEncodedBytes+=i;\n  WEBAudio.pendingDecodes++;WEBAudio.pendingEncodedBytes+=i;\n  _hkAudioPumpDecodes();\n  // Preserve the legacy immediate setup-error contract. A job started later\n  // reports failure through GetLoadState, since its caller has already returned.\n  if(job.setupError){delete WEBAudio.audioInstances[id];throw job.setupError;}\n  return id;\n}"], ["if(!n)return;n.__hkReleased=true;if(n.source)", "if(!n)return;n.__hkReleased=true;WEBAudio.cancelDecode(n);if(n.source)"]];
+    for (const [before, after] of audio17MemoryReplacements) {
+      if (patched.indexOf(before) < 0 || patched.indexOf(before) !== patched.lastIndexOf(before)) {
+        throw new Error('Unexpected Unity r17 audio layout; runtime patches were not applied.');
+      }
+      patched = patched.replace(before, after);
+    }
+    // r17: inspect existing mmap ownership only when explicitly requested.
+    const mmapSnapshotCreate = "function ___syscall192(e,i){SYSCALLS.varargs=i;try{var n,t=SYSCALLS.get(),r=SYSCALLS.get(),o=SYSCALLS.get(),_=SYSCALLS.get(),a=SYSCALLS.get(),l=SYSCALLS.get();l<<=12;var u=!1;if(-1===a){if(!(n=_memalign(PAGE_SIZE,r)))return-ERRNO_CODES.ENOMEM;_memset(n,0,r),u=!0}else{var s=FS.getStream(a);if(!s)return-ERRNO_CODES.EBADF;var c=FS.mmap(s,HEAPU8,t,r,l,o,_);n=c.ptr,u=c.allocated}return SYSCALLS.mappings[n]={malloc:n,len:r,allocated:u,fd:a,flags:_},n}catch(e){return void 0!==FS&&e instanceof FS.ErrnoError||abort(e),-e.errno}}";
+    const mmapSnapshotUnmap = "function ___syscall91(e,i){SYSCALLS.varargs=i;try{var n=SYSCALLS.get(),t=SYSCALLS.get(),r=SYSCALLS.mappings[n];if(!r)return 0;if(t===r.len){var o=FS.getStream(r.fd);SYSCALLS.doMsync(n,o,t,r.flags),FS.munmap(o),delete SYSCALLS.mappings[n],r.allocated&&_free(r.malloc)}return 0}catch(e){return void 0!==FS&&e instanceof FS.ErrnoError||abort(e),-e.errno}}";
+    for (const marker of [mmapSnapshotCreate, mmapSnapshotUnmap]) {
+      if (patched.indexOf(marker) < 0 || patched.indexOf(marker) !== patched.lastIndexOf(marker)) {
+        throw new Error('Unexpected Unity mmap ownership layout; runtime patches were not applied.');
+      }
+    }
+    patched = patched.replace(mmapSnapshotCreate, mmapSnapshotCreate + "\n// Requested metadata only. These allocations are already inside the WASM heap.\n// No buffer references, native pointers, or per-file records escape this call.\nModule.__hkMmapMemorySnapshot = function () {\n  var records = SYSCALLS.mappings;\n  var owned = new Map();\n  var count = 0, ranges = 0, largest = 0;\n  var allocatedRecords = 0, borrowedRecords = 0, borrowedBytes = 0;\n  var aliases = 0, inconsistentOwners = 0, invalid = 0;\n  for (var key of Object.keys(records)) {\n    var record = records[key];\n    if (!record) continue;\n    count++;\n    var length = record.len;\n    if (!Number.isSafeInteger(length) || length < 0) {\n      invalid++;\n      continue;\n    }\n    ranges += length;\n    largest = Math.max(largest, length);\n    if (!record.allocated) {\n      borrowedRecords++;\n      borrowedBytes += length;\n      continue;\n    }\n    allocatedRecords++;\n    var pointer = record.malloc;\n    if (!Number.isSafeInteger(pointer) || pointer <= 0) {\n      invalid++;\n      continue;\n    }\n    if (owned.has(pointer)) {\n      aliases++;\n      var previous = owned.get(pointer);\n      if (previous !== length) inconsistentOwners++;\n      // Aliased records describe one allocation, never independent buffers.\n      owned.set(pointer, Math.max(previous, length));\n    } else owned.set(pointer, length);\n  }\n  var ownedBytes = 0;\n  for (var bytes of owned.values()) ownedBytes += bytes;\n  return {\n    scope: \"Current mmap metadata inside WASM; not additional process memory or allocator overhead\",\n    mappingRecords: count,\n    mappedRangeBytes: ranges,\n    largestMappedRangeBytes: largest,\n    allocatedMappingRecords: allocatedRecords,\n    uniqueOwnedAllocations: owned.size,\n    uniqueOwnedMappedPayloadBytes: ownedBytes,\n    borrowedMappingRecords: borrowedRecords,\n    borrowedMappedRangeBytes: borrowedBytes,\n    duplicateOwnedPointerRecords: aliases,\n    inconsistentOwnedLengthRecords: inconsistentOwners,\n    invalidMappingRecords: invalid,\n    partialUnmapTrackingSupported: false,\n    unmapTracking: \"Legacy glue releases exact whole mappings only; partial unmap attempts are not recorded\"\n  };\n};\n\n");
+    return patched;
+  };
+
+  global.installHollowKnightLifecycle = function (canvas) {
+    if (global.__hkLifecycle) return global.__hkLifecycle;
+    const doc = canvas.ownerDocument;
+    const view = doc.defaultView;
+    const documents = [doc];
+    const views = [view];
+    // The launcher uses same-origin srcdoc + Blob frames. Parent pagehide may
+    // arrive before child visibilitychange; observe each accessible ancestor.
+    for (let current = view; current.parent && current.parent !== current;) {
+      try {
+        const parent = current.parent;
+        documents.push(parent.document);
+        views.push(parent);
+        current = parent;
+      } catch (_) { break; } // Cross-origin ancestor: child visibility still applies.
+    }
+    const hiddenViews = new Set();
+    const frozenDocuments = new Set();
+    const state = {
+      version: VERSION, phase: 'starting', paused: false, ready: false,
+      reason: '', fatal: '', graphicsPending: false, audioState: 'uninitialized', lastError: '',
+      suspends: 0, resumes: 0, events: [], storageError: '', previous: null
+    };
+    let module = null, runtime = null, audio = null;
+    let ownLoopPause = false, ownCallbacksPause = false;
+    let epoch = 0, disposed = false, pendingAudio = null;
+    let panel = null, title = null, text = null, button = null, details = null;
+    const storageKey = 'hk.lifecycle.last';
+    try { state.previous = JSON.parse(view.sessionStorage.getItem(storageKey) || 'null'); }
+    catch (error) { state.storageError = String(error.message || error); }
+
+    function hidden() {
+      if (hiddenViews.size > 0 || frozenDocuments.size > 0) return true;
+      for (let index = 0; index < documents.length; index += 1) {
+        if (documents[index].hidden) return true;
+      }
+      return false;
+    }
+
+    function report() {
+      const stats = global.__hkLazyStats;
+      return {
+        version: VERSION, phase: state.phase, reason: state.reason, fatal: state.fatal,
+        hidden: hidden(), graphicsPending: state.graphicsPending, audioState: audio ? audio.state : state.audioState,
+        lastError: state.lastError, storageError: state.storageError,
+        heapBytes: module && module.HEAPU8 ? module.HEAPU8.byteLength : 0,
+        heapGrowthRecovery: module ? module.__hkHeapGrowthRecovery || null : null,
+        heapGrowthSlackLimitBytes: module ? module.__hkMaxHeapGrowthSlack || 0 : 0,
+        releasedGraphicsUploadMappings: module ? module.__hkMemoryFixStats || null : null,
+        contextLost: Boolean(module && module.ctx && module.ctx.isContextLost()),
+        fsError: stats ? stats.lastError : '',
+        fsSyncLoads: stats ? stats.syncPartLoads : 0,
+        fsSyncBlockedMs: stats ? stats.syncBlockedMs : 0,
+        fsMmapCalls: stats ? stats.mmapCalls : 0,
+        fsCacheBytes: stats ? stats.cacheBytes : 0,
+        fsLastFailure: stats ? stats.lastFailure : null,
+        fsFirstFailure: global.__hkLastReadFailure || null,
+        preload: global.__hkNeighborPreload ? {
+          scene: global.__hkNeighborPreload.state.currentScene,
+          source: global.__hkNeighborPreload.state.currentSource,
+          status: global.__hkNeighborPreload.state.status,
+          activeParts: Array.from(global.__hkNeighborPreload.state.activeWarmParts),
+          demandPauses: global.__hkNeighborPreload.state.demandPauses,
+          lastFailure: global.__hkNeighborPreload.state.lastFailure,
+          effectiveness: global.__hkNeighborPreload.report()
+        } : null,
+        events: state.events.slice()
+      };
+    }
+
+    function record(event) {
+      state.events.push({ event, at: Math.round(view.performance.now()) });
+      if (state.events.length > 24) state.events.shift();
+      try { view.sessionStorage.setItem(storageKey, JSON.stringify(report())); }
+      catch (error) { state.storageError = String(error.message || error); }
+    }
+
+    function show() {
+      if (!state.paused || hidden() || disposed) return;
+      if (!panel) {
+        panel = doc.createElement('div');
+        panel.id = 'hk-resume-panel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-modal', 'true');
+        panel.setAttribute('aria-labelledby', 'hk-resume-title');
+        panel.style.cssText = 'position:fixed;inset:0;z-index:2147483645;display:grid;' +
+          'place-content:center;background:rgba(16,16,24,.94);color:#fff;' +
+          'padding:24px;box-sizing:border-box;font:16px/1.5 system-ui,sans-serif;text-align:center';
+        const box = doc.createElement('div');
+        box.style.cssText = 'max-width:480px;width:100%';
+        title = doc.createElement('h2'); title.id = 'hk-resume-title';
+        title.style.cssText = 'font-size:22px;margin:0 0 12px';
+        text = doc.createElement('p'); text.id = 'hk-resume-message';
+        button = doc.createElement('button'); button.id = 'hk-resume-button'; button.type = 'button';
+        button.style.cssText = 'font:600 16px system-ui;padding:12px 28px;cursor:pointer;margin:10px 0';
+        button.addEventListener('click', resume);
+        const diagnostic = doc.createElement('details'); diagnostic.style.cssText = 'text-align:left;margin-top:18px';
+        const summary = doc.createElement('summary'); summary.textContent = 'Diagnostic details';
+        details = doc.createElement('textarea'); details.readOnly = true; details.rows = 10;
+        details.style.cssText = 'box-sizing:border-box;width:100%;margin-top:8px;font:11px monospace';
+        details.setAttribute('aria-label', 'Suspend/resume diagnostic details');
+        diagnostic.addEventListener('toggle', () => { if (diagnostic.open) details.value = JSON.stringify(report(), null, 2); });
+        diagnostic.appendChild(summary); diagnostic.appendChild(details);
+        box.appendChild(title); box.appendChild(text); box.appendChild(button); box.appendChild(diagnostic);
+        panel.appendChild(box); doc.body.appendChild(panel);
+      }
+      panel.style.display = 'grid';
+      title.textContent = state.fatal ? 'Game stopped' : 'Game paused';
+      text.textContent = state.fatal ? state.lastError + ' Reopen Hollow Knight through Game Library. Existing saved data has not been deleted.' :
+        state.graphicsPending ? 'Waiting for Unity to restore the graphics context. The game remains paused.' :
+        state.phase === 'resuming' ? 'Resuming audio and game…' :
+        state.lastError ? state.lastError + ' Tap Resume to retry.' :
+        'Safari interrupted the session. Tap Resume when you are ready to continue.';
+      button.textContent = state.phase === 'resuming' ? 'Resuming…' : 'Resume';
+      button.hidden = Boolean(state.fatal);
+      button.disabled = !state.ready || state.graphicsPending || state.phase === 'resuming';
+      details.value = JSON.stringify(report(), null, 2);
+    }
+
+    function captureAudio() {
+      const next = runtime && runtime.audio;
+      if (!next || next === audio) return;
+      if (audio) audio.removeEventListener('statechange', audioChanged);
+      audio = next;
+      state.audioState = audio.state;
+      audio.addEventListener('statechange', audioChanged);
+      if (audio.state === 'interrupted' && !state.paused) pause('audio-interrupted');
+    }
+
+    function suspendAudio() {
+      if (!audio || audio.state === 'closed' || audio.state === 'suspended') return;
+      // Do not close/recreate AudioContext: that invalidates Unity's node graph.
+      try {
+        Promise.resolve(audio.suspend()).catch(error => {
+          state.lastError = 'Audio suspension failed: ' + String(error.message || error);
+          record('audio-suspend-error'); show();
+        });
+      } catch (error) {
+        state.lastError = 'Audio suspension failed: ' + String(error.message || error);
+        record('audio-suspend-error'); show();
+      }
+    }
+
+    function quiesce() {
+      if (!runtime) return;
+      const loop = runtime.loop;
+      // Only resume a loop that this controller actually paused. This also
+      // invalidates stale scheduled callbacks via Emscripten's generation ID.
+      if (!ownLoopPause && loop.func && loop.scheduler) {
+        ownLoopPause = true; loop.pause();
+      }
+      if (!ownCallbacksPause && runtime.callbacksAllowed) {
+        ownCallbacksPause = true; runtime.pauseCallbacks();
+      }
+      captureAudio(); suspendAudio();
+      if (global.__hkNeighborPreload) global.__hkNeighborPreload.suspend();
+    }
+
+    function pause(reason) {
+      if (disposed) return;
+      // Invalidate an unfinished resume on EVERY new suspension event.
+      epoch += 1;
+      if (!state.paused) state.suspends += 1;
+      state.paused = true;
+      if (!state.fatal) {
+        state.reason = reason;
+        state.phase = hidden() ? 'hidden' : state.graphicsPending ? 'waiting-for-graphics' : 'awaiting-resume';
+      }
+      quiesce(); record(reason); show();
+    }
+
+    function fail(code, message) {
+      if (disposed || state.fatal) return;
+      state.fatal = code; state.lastError = message;
+      state.phase = 'failed'; state.reason = code;
+      pause(code);
+      console.error('Hollow Knight stopped:', code, message);
+    }
+
+    function audioChanged() {
+      state.audioState = audio.state;
+      if (state.paused || hidden()) {
+        if (audio.state === 'running' && state.phase !== 'resuming') suspendAudio();
+      } else if (audio.state === 'interrupted') {
+        pause('audio-interrupted');
+      }
+      // A statechange need not mean the game can resume. Only an explicit
+      // successful Resume attempt releases the game and deferred callbacks.
+    }
+
+    function requestAudioResume() {
+      captureAudio();
+      if (!audio || audio.state === 'running' || audio.state === 'closed' ||
+          state.paused || hidden() || pendingAudio || disposed) return;
+      try {
+        const task = Promise.resolve(audio.resume());
+        pendingAudio = task;
+        task.catch(error => {
+          state.lastError = 'Audio resume failed: ' + String(error.message || error);
+          record('audio-auto-resume-error');
+        }).finally(() => { if (pendingAudio === task) pendingAudio = null; });
+      } catch (error) {
+        state.lastError = 'Audio resume failed: ' + String(error.message || error);
+        record('audio-auto-resume-error');
+      }
+    }
+
+    async function resume() {
+      if (disposed || !state.paused || !state.ready || hidden() || state.fatal || state.graphicsPending || state.phase === 'resuming') return false;
+      if (runtime.aborted || global.__hkLastReadFailure) {
+        fail('runtime-failed', 'Unity has already reported a fatal error.'); return false;
+      }
+      if (module.ctx && module.ctx.isContextLost()) {
+        contextLost(); return false;
+      }
+      const token = ++epoch;
+      state.phase = 'resuming'; state.lastError = '';
+      record('resume-request'); show(); captureAudio();
+      let timer = null, releasedEngine = false;
+      try {
+        if (audio && audio.state !== 'running') {
+          if (audio.state === 'closed') throw new Error('The game’s audio context has closed.');
+          // Call resume synchronously IN the click handler. An earlier autoplay
+          // request may remain pending on iOS; do not reuse that old Promise.
+          const task = Promise.resolve(audio.resume());
+          await Promise.race([task, new Promise((_, reject) => {
+            timer = view.setTimeout(() => reject(new Error('Safari has not resumed audio yet.')), AUDIO_WAIT_MS);
+          })]);
+          if (audio.state !== 'running') throw new Error('Safari is still interrupting audio.');
+        }
+        if (token !== epoch || hidden() || disposed || state.fatal) return false;
+        if (runtime.aborted || global.__hkLastReadFailure) throw new Error('Unity reported an error during resume.');
+        if (module.ctx && module.ctx.isContextLost()) {
+          contextLost(); return false;
+        }
+        // The GPU/audio checks complete before any suspended engine work runs.
+        releasedEngine = true;
+        state.paused = false; state.phase = 'running'; state.reason = ''; 
+        if (ownCallbacksPause) { ownCallbacksPause = false; runtime.resumeCallbacks(); }
+        if (runtime.aborted && !state.fatal) fail('runtime-failed', 'Unity stopped while resuming callbacks.');
+        if (state.paused || state.fatal) return false;
+        if (ownLoopPause) { ownLoopPause = false; runtime.loop.resume(); }
+        if (global.__hkNeighborPreload) global.__hkNeighborPreload.resume();
+        state.resumes += 1; record('resume-complete');
+        doc.dispatchEvent(new view.Event('hk-game-resumed'));
+        if (panel) panel.style.display = 'none';
+        canvas.focus({ preventScroll: true });
+        return true;
+      } catch (error) {
+        if (token !== epoch || disposed || state.fatal) return false;
+        if (releasedEngine) {
+          fail('resume-callback-error', String(error.message || error)); return false;
+        }
+        state.paused = true; state.phase = 'awaiting-resume';
+        state.lastError = String(error.message || error);
+        quiesce(); record('resume-failed'); show();
+        return false;
+      } finally {
+        if (timer !== null) view.clearTimeout(timer);
+      }
+    }
+
+    function visibility() {
+      if (hidden()) pause('visibility-hidden');
+      else if (state.paused) {
+        if (!state.fatal && state.phase !== 'resuming') state.phase = state.graphicsPending ? 'waiting-for-graphics' : 'awaiting-resume';
+        record('visible'); show();
+      }
+    }
+    function pagehide(event) {
+      // Only this document's FINAL departure disposes the game. Hidden tabs,
+      // screen locking, ancestor events and bfcache pagehide retain Resume.
+      if (event.currentTarget === view && event.persisted === false) {
+        controller.cleanup();
+        return;
+      }
+      hiddenViews.add(event.currentTarget); pause('pagehide');
+    }
+    function pageshow(event) { hiddenViews.delete(event.currentTarget); visibility(); }
+    function freeze(event) { frozenDocuments.add(event.currentTarget); pause('freeze'); }
+    function thaw(event) { frozenDocuments.delete(event.currentTarget); visibility(); }
+    function contextLost() {
+      // Preserve an existing native Unity restoration path, when registered.
+      // Never synthesize GPU resources or assume a restored buffer is enough.
+      if (runtime && runtime.contextRestoreRegistered && !state.fatal) {
+        state.graphicsPending = true;
+        pause('webgl-context-lost');
+      } else {
+        fail('webgl-context-lost', 'Safari lost the game’s graphics resources; this instance has no registered Unity restoration handler.');
+      }
+    }
+    function contextRestored() {
+      // Our listener is installed first. Wait until Unity's own event handlers
+      // have run before allowing a Resume tap. Do not preempt their recovery.
+      Promise.resolve().then(() => {
+        if (disposed) return;
+        record('webgl-context-restored');
+        if (state.graphicsPending && !state.fatal) {
+          if (!runtime.contextRestoreRegistered || runtime.aborted) {
+            fail('graphics-restore-failed', 'Unity could not complete its graphics restoration.');
+          } else if (module.ctx && !module.ctx.isContextLost()) {
+            state.graphicsPending = false;
+            state.phase = hidden() ? 'hidden' : 'awaiting-resume';
+          }
+        }
+        show();
+      });
+    }
+
+    const controller = {
+      version: VERSION, state, report, resume, pause, requestAudioResume,
+      bind(unityModule) {
+        if (disposed) throw new Error('The Hollow Knight session has already ended.');
+        module = unityModule; runtime = module.__hkRuntime;
+        if (!runtime || runtime.version !== VERSION) throw new Error('Unity suspend/resume bridge is unavailable.');
+        module.__hkLifecycle = controller;
+        module.deinitializers.push(controller.cleanup);
+        if (state.paused || hidden()) pause('bind-hidden');
+      },
+      beforeFrame() {
+        if (disposed) return false;
+        if (hidden() && !state.paused) pause('frame-hidden');
+        if (state.paused) { quiesce(); return false; }
+        if (!audio) captureAudio();
+        return !state.paused;
+      },
+      audioTick(timer) {
+        captureAudio();
+        if (audio && audio.state === 'running') module.clearInterval(timer);
+        else requestAudioResume();
+      },
+      ready() {
+        state.ready = true;
+        if (state.paused || hidden()) { if (!state.paused) pause('ready-hidden'); show(); }
+        else { state.phase = 'running'; record('ready'); }
+      },
+      runtimeError(error) {
+        fail('unity-error', String(error && error.message ? error.message : error));
+        return true; // Replaced popup with explicit fatal panel, not a recovery.
+      },
+      cleanup() {
+        if (disposed) return;
+        pause('cleanup'); disposed = true; state.phase = 'disposed';
+        if (module && module.__hkAudioRetire) module.__hkAudioRetire();
+        if (global.__hkNeighborPreload) global.__hkNeighborPreload.cleanup();
+        if (canvas.__hkKeyboardBridgeCleanup) canvas.__hkKeyboardBridgeCleanup();
+        for (const documentRef of documents) {
+          documentRef.removeEventListener('visibilitychange', visibility, true);
+          documentRef.removeEventListener('freeze', freeze, true);
+          documentRef.removeEventListener('resume', thaw, true);
+        }
+        for (const windowRef of views) {
+          windowRef.removeEventListener('pagehide', pagehide, true);
+          windowRef.removeEventListener('pageshow', pageshow, true);
+        }
+        canvas.removeEventListener('webglcontextlost', contextLost, true);
+        canvas.removeEventListener('webglcontextrestored', contextRestored, true);
+        if (audio) {
+          audio.removeEventListener('statechange', audioChanged);
+          // The session is ending, NOT temporarily suspended. A closed context
+          // releases its browser audio resources; this is never done on hide.
+          if (audio.state !== 'closed') {
+            try {
+              Promise.resolve(audio.close()).catch(error => {
+                state.lastError = 'Audio cleanup failed: ' + String(error.message || error);
+                console.warn(state.lastError);
+              });
+            } catch (error) {
+              state.lastError = 'Audio cleanup failed: ' + String(error.message || error);
+              console.warn(state.lastError);
+            }
+          }
+        }
+        if (panel) panel.remove();
+        if (global.__hkUnityInstance && global.__hkUnityInstance.Module === module) {
+          delete global.__hkUnityInstance;
+        }
+        module = runtime = audio = pendingAudio = null;
+        documents.length = views.length = 0;
+        hiddenViews.clear(); frozenDocuments.clear();
+        if (global.__hkLifecycle === controller) delete global.__hkLifecycle;
+      }
+    };
+    for (const documentRef of documents) {
+      documentRef.addEventListener('visibilitychange', visibility, true);
+      documentRef.addEventListener('freeze', freeze, true);
+      documentRef.addEventListener('resume', thaw, true);
+    }
+    for (const windowRef of views) {
+      windowRef.addEventListener('pagehide', pagehide, true);
+      windowRef.addEventListener('pageshow', pageshow, true);
+    }
+    canvas.addEventListener('webglcontextlost', contextLost, true);
+    canvas.addEventListener('webglcontextrestored', contextRestored, true);
+    global.__hkLifecycle = controller;
+    if (hidden()) pause('initially-hidden');
+    return controller;
+  };
+})(window);

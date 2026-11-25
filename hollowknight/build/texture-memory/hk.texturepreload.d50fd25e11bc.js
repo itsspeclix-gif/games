@@ -1,0 +1,791 @@
+(function () {
+  'use strict';
+
+  const BUILD_VERSION = '2026.11.20-r17';
+  const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
+  const DEFAULT_READ_WINDOW_MS = 1800;
+  // Scheduling policy, NOT a Unity scene-loaded event. Wait after scene
+  // identification or a source-cache MISS. Cached reads must not starve warming.
+  const ASSET_QUIET_MS = 1500;
+  // Frame gaps are diagnostic only: CPU/GC/network stalls are not proof of
+  // memory pressure and must not repeatedly cancel or starve preloading.
+  // Actual WASM growth still defers optional downloads; required reads continue.
+  const FRAME_GAP_MS = 250;
+  const RECOVERY_QUIET_MS = 2000;
+  const WARM_TTL_MS = 120000;
+  const RETRY_COOLDOWN_MS = 15000;
+  const REQUEST_TIMEOUT_MS = 30000;
+  const MAX_RECENT_READS = 128;
+  const MAX_LEARNED_PARTS = 16;
+  const preloadFetch = window.fetch.bind(window);
+
+  if (window.installHollowKnightNeighborPreload) return;
+  window.__hkPreloadVersion = BUILD_VERSION;
+  window.__hkTexturePreloadVersion = "2026.11.22-texture1";
+
+  // Decode ONLY the small UnityFS block-info table, not any game assets.
+  // Block format: https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md
+  function decodeLZ4(input, size) {
+    const output = new Uint8Array(size);
+    let source = 0, target = 0;
+    while (source < input.length) {
+      const token = input[source++];
+      let literals = token >>> 4;
+      if (literals === 15) {
+        let extra;
+        do {
+          if (source >= input.length) throw new Error('Truncated LZ4 literal length');
+          extra = input[source++];
+          literals += extra;
+        } while (extra === 255);
+      }
+      if (source + literals > input.length || target + literals > size) {
+        throw new Error('Invalid LZ4 literal extent');
+      }
+      output.set(input.subarray(source, source + literals), target);
+      source += literals;
+      target += literals;
+      if (source === input.length) break;
+      if (source + 2 > input.length) throw new Error('Truncated LZ4 match offset');
+      const distance = input[source] | (input[source + 1] << 8);
+      source += 2;
+      if (!distance || distance > target) throw new Error('Invalid LZ4 match offset');
+      let count = (token & 15) + 4;
+      if ((token & 15) === 15) {
+        let extra;
+        do {
+          if (source >= input.length) throw new Error('Truncated LZ4 match length');
+          extra = input[source++];
+          count += extra;
+        } while (extra === 255);
+      }
+      if (target + count > size) throw new Error('Invalid LZ4 match extent');
+      // Forward copy is necessary for overlapping LZ4 matches.
+      for (let index = 0; index < count; index += 1) {
+        output[target] = output[target - distance];
+        target += 1;
+      }
+    }
+    if (target !== size) throw new Error('Incorrect LZ4 decoded size');
+    return output;
+  }
+
+  // The published analysis map contains block lists and repeated neighbor
+  // expansions used only by offline tooling. Retain only runtime fields;
+  // all scene evidence and preload ordering below remain identical.
+  function compactPreloadMap(input) {
+    if (!input || !input._meta || !input.scenes || typeof input.scenes !== 'object') return input;
+    const scenes = Object.create(null);
+    for (const name of Object.keys(input.scenes)) {
+      const record = input.scenes[name];
+      if (!record || typeof record !== 'object') throw new Error('Invalid preload scene ' + name);
+      scenes[name] = {
+        levelFile: record.levelFile,
+        resourceFile: record.resourceFile,
+        dataUnity3dChunks: record.dataUnity3dChunks,
+        directPreloadChunks: record.directPreloadChunks,
+        neighbors: record.neighbors
+      };
+    }
+    const meta = input._meta;
+    return { _meta: {
+      outerChunkSize: meta.outerChunkSize, outerChunkCount: meta.outerChunkCount,
+      logicalArchiveSize: meta.logicalArchiveSize,
+      dataUnity3dOuterOffset: meta.dataUnity3dOuterOffset,
+      dataUnity3dSize: meta.dataUnity3dSize, unityFS: meta.unityFS
+    }, scenes };
+  }
+
+  function buildSceneRanges(FS, map) {
+    const meta = map._meta.unityFS;
+    const node = FS.lookupPath('data.unity3d').node;
+    if (!meta || node.usedBytes !== map._meta.dataUnity3dSize ||
+        (meta.archiveFlags & 128) || !Number.isSafeInteger(meta.compressedInfoSize) ||
+        !Number.isSafeInteger(meta.uncompressedInfoSize) ||
+        meta.compressedInfoSize <= 0 || meta.compressedInfoSize > 2 * 1024 * 1024 ||
+        meta.uncompressedInfoSize < 20 || meta.uncompressedInfoSize > 2 * 1024 * 1024 ||
+        !Number.isSafeInteger(meta.dataStart) || meta.dataStart < meta.compressedInfoSize ||
+        meta.dataStart > node.usedBytes) {
+      throw new Error('Unsupported or mismatched UnityFS preload metadata');
+    }
+    const compressed = new Uint8Array(meta.compressedInfoSize);
+    const stream = FS.open('data.unity3d', 'r');
+    try {
+      const count = FS.read(stream, compressed, 0, compressed.length,
+        meta.dataStart - meta.compressedInfoSize);
+      if (count !== compressed.length) throw new Error('Truncated UnityFS block-info table');
+    } finally {
+      FS.close(stream);
+    }
+    const compression = meta.archiveFlags & 63;
+    if (compression !== 0 && compression !== 2 && compression !== 3) {
+      throw new Error('Unsupported UnityFS block-info compression ' + compression);
+    }
+    const table = compression === 0 ? compressed : decodeLZ4(compressed, meta.uncompressedInfoSize);
+    if (table.length !== meta.uncompressedInfoSize) throw new Error('Incorrect UnityFS table size');
+    const view = new DataView(table.buffer, table.byteOffset, table.byteLength);
+    const count = view.getUint32(16, false);
+    if (count !== meta.blockCount || 20 + count * 10 > table.length) {
+      throw new Error('Incorrect UnityFS block count');
+    }
+    const offsets = new Uint32Array(count + 1);
+    const decodedOffsets = new Float64Array(count + 1);
+    const owners = new Uint16Array(count);
+    offsets[0] = meta.dataStart;
+    for (let index = 0; index < count; index += 1) {
+      const end = offsets[index] + view.getUint32(24 + index * 10, false);
+      if (end > node.usedBytes) throw new Error('UnityFS compressed block outside bundle');
+      offsets[index + 1] = end;
+      decodedOffsets[index + 1] = decodedOffsets[index] + view.getUint32(20 + index * 10, false);
+    }
+    if (offsets[count] !== meta.compressedBlocksEnd) {
+      throw new Error('UnityFS block offsets do not match preload map');
+    }
+    const names = Object.keys(map.scenes);
+    if (names.length >= 65535) throw new Error('Too many scene markers');
+    const levelNames = new Map(names.map((name, index) => [map.scenes[name].levelFile, index + 1]));
+    let position = 20 + count * 10;
+    if (position + 4 > table.length || view.getUint32(position, false) !== meta.nodeCount) {
+      throw new Error('Incorrect UnityFS node count');
+    }
+    position += 4;
+    let mappedLevels = 0;
+    for (let item = 0; item < meta.nodeCount; item += 1) {
+      if (position + 20 > table.length) throw new Error('Truncated UnityFS node');
+      const start = view.getUint32(position, false) * 4294967296 + view.getUint32(position + 4, false);
+      const size = view.getUint32(position + 8, false) * 4294967296 + view.getUint32(position + 12, false);
+      position += 20;
+      let name = '';
+      while (position < table.length && table[position] !== 0) name += String.fromCharCode(table[position++]);
+      if (position === table.length) throw new Error('Unterminated UnityFS filename');
+      position += 1;
+      if (!Number.isSafeInteger(start + size) || start + size > decodedOffsets[count]) {
+        throw new Error('UnityFS node outside decoded bundle');
+      }
+      const owner = levelNames.get(name);
+      if (!owner) continue;
+      mappedLevels += 1;
+      let low = 0, high = count;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (decodedOffsets[middle] < start) low = middle + 1; else high = middle;
+      }
+      // Use only blocks wholly inside the level file. Boundary blocks can also
+      // contain another scene's assets and are deliberately NOT exact markers.
+      for (let block = low; block < count && decodedOffsets[block + 1] <= start + size; block += 1) {
+        owners[block] = owners[block] === 0 || owners[block] === owner ? owner : 65535;
+      }
+    }
+    if (mappedLevels !== names.length) throw new Error('Scene map does not match UnityFS level files');
+    const ranges = [];
+    for (let index = 0; index < count; index += 1) {
+      const owner = owners[index];
+      // A block shared by two level files is NOT an exact scene signal.
+      if (!owner || owner === 65535) continue;
+      const start = offsets[index];
+      const scene = names[owner - 1];
+      const previous = ranges[ranges.length - 1];
+      if (previous && previous.scene === scene && previous.end === start) {
+        previous.end = offsets[index + 1];
+      } else {
+        ranges.push({ start, end: offsets[index + 1], scene });
+      }
+    }
+    return ranges;
+  }
+
+  window.installHollowKnightNeighborPreload = async function (instance, options = {}) {
+    if (window.__hkNeighborPreload) return window.__hkNeighborPreload;
+    if (!instance || !instance.Module) throw new Error('Hollow Knight Unity instance is unavailable');
+    const module = instance.Module;
+    const FS = module.__FS;
+    const stats = window.__hkLazyStats;
+    if (!FS || !stats || typeof module.__hkDataPartUrl !== 'function' ||
+        typeof module.__hkDataPartResident !== 'function') {
+      throw new Error('Matching Hollow Knight filesystem is required');
+    }
+    const partSize = Number(options.partSize) || DEFAULT_PART_SIZE;
+    const recentReadWindowMs = Math.max(250, Number(options.recentReadWindowMs) || DEFAULT_READ_WINDOW_MS);
+    const dataPartUrls = module.__hkTexturePartUrls || options.dataPartUrls;
+    if (!Array.isArray(dataPartUrls) || !dataPartUrls.length) throw new Error('Missing preload part URLs');
+    const partCount = dataPartUrls.length;
+    const state = {
+      currentScene: '', currentSource: '',
+      lastDemandTime: performance.now(), demandDepth: 0, demandPauses: 0,
+      ignoredSceneHints: 0, sceneChanges: [],
+      runtimeHoldUntil: 0, lastFrameTime: null,
+      heapCapacityBytes: module.HEAPU8 ? module.HEAPU8.byteLength : 0,
+      heapGrowthEvents: 0, longFrameGaps: 0, recoveryPauses: 0,
+      lastRecoveryReason: '', lastSampleTime: -Infinity, runtimeSamples: [],
+      demandedParts: new Set(), demandMisses: 0, preparedMisses: 0,
+      demandStart: 0, demandWaitMs: 0,
+      cacheEvidence: { observed: 0, cached: 0, network: 0, unknown: 0,
+        warmedCached: 0, warmedNetwork: 0, warmedUnknown: 0, transferBytes: 0 },
+      recentHTTPReads: [], timingStatus: 'unavailable',
+      resourceToScene: new Map(), recentDataReads: [], candidateScene: '', candidateHits: 0,
+      candidateTimer: null, warmController: null, warmedParts: new Map(),
+      activeWarmParts: new Set(), failedParts: new Map(), learnedParts: new Map(),
+      desiredParts: new Set(), queue: [], refreshTimer: null, running: false,
+      suspended: Boolean(document.hidden || (module.__hkLifecycle && module.__hkLifecycle.state.paused)), disposed: false, status: 'initializing',
+      warmRequests: 0, warmRetries: 0, warmFailures: 0, warmBytes: 0,
+      lastError: '', lastFailure: null, streamFallbacks: 0, markerRanges: 0,
+      lastFileRestore: null, dataReadRestore: null
+    };
+
+    function reportError(error, detail) {
+      const message = error && error.message ? error.message : String(error);
+      state.lastFailure = Object.assign({ message }, detail);
+      if (state.lastError !== message) console.warn('Hollow Knight preload:', message, detail);
+      state.lastError = message;
+    }
+
+    // Metadata remains asynchronous. Asset bodies use the filesystem's shared
+    // failover plan below, so preloading and demand reads agree on cache keys.
+    async function fetchMap(url) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const request = new AbortController();
+        const timeout = setTimeout(() => request.abort(), REQUEST_TIMEOUT_MS);
+        let response;
+        try {
+          response = await preloadFetch(url, {
+            cache: attempt === 0 ? 'force-cache' : 'reload',
+            credentials: 'same-origin', signal: request.signal
+          });
+          if (response.status !== 200) throw new Error('Preload map HTTP ' + response.status + ' for ' + url);
+          const map = compactPreloadMap(JSON.parse(await response.text()));
+          if (request.signal.aborted) throw new Error('Preload map request timed out');
+          return map;
+        } catch (error) {
+          request.abort();
+          if (response && response.body) {
+            try { await response.body.cancel(); } catch (_) { /* Preserve the original error. */ }
+          }
+          if (attempt === 2) throw error;
+        } finally { clearTimeout(timeout); }
+      }
+    }
+
+    if (typeof module.__hkWarmDataPart !== 'function') throw new Error('Preload requires the matching r8 filesystem');
+    const map = module.__hkTexturePreloadMap || await fetchMap(options.mapUrl || 'build/preload-analysis/preload-map.analysis.json');
+    if (!map || !map._meta || !map.scenes || typeof map.scenes !== 'object' ||
+        map._meta.outerChunkSize !== partSize || map._meta.outerChunkCount !== partCount ||
+        !Number.isSafeInteger(map._meta.logicalArchiveSize) ||
+        Math.ceil(map._meta.logicalArchiveSize / partSize) !== partCount) {
+      throw new Error('Hollow Knight preload map geometry is malformed or stale');
+    }
+    const ranges = buildSceneRanges(FS, map);
+    state.markerRanges = ranges.length;
+    const markerScenes = new Set(ranges.map(range => range.scene));
+    const sceneParts = new Map();
+    for (const [name, record] of Object.entries(map.scenes)) {
+      if (record.resourceFile) state.resourceToScene.set(record.resourceFile.split('/').pop(), name);
+      sceneParts.set(name, new Set(record.dataUnity3dChunks || []));
+    }
+
+    function getSceneRecord(name) { return map.scenes[name] || null; }
+
+    function orderedNeighborParts(sceneName) {
+      const record = getSceneRecord(sceneName);
+      if (!record) return [];
+      const neighbors = (record.neighbors || []).filter(name => getSceneRecord(name));
+      const groups = neighbors.map(name => getSceneRecord(name).directPreloadChunks || []);
+      const seen = new Set(), parts = [];
+      // Round-robin direct chunks: a large alphabetically first neighbor must
+      // not monopolize the only worker while every other exit remains cold.
+      const depth = Math.max(0, ...groups.map(group => group.length));
+      for (let index = 0; index < depth; index += 1) {
+        for (const group of groups) {
+          const part = group[index];
+          if (Number.isInteger(part) && part >= 1 && part <= partCount && !seen.has(part)) {
+            seen.add(part); parts.push(part);
+          }
+        }
+      }
+      let extras = 0;
+      for (const name of neighbors) {
+        for (const part of state.learnedParts.get(name) || []) {
+          if (extras >= MAX_LEARNED_PARTS) break;
+          if (!seen.has(part)) { seen.add(part); parts.push(part); extras += 1; }
+        }
+      }
+      return parts;
+    }
+
+    function scheduleWarmPass() {
+      if (state.refreshTimer !== null) clearTimeout(state.refreshTimer);
+      state.refreshTimer = null;
+      if (state.disposed || state.suspended || state.running || state.demandDepth || !state.desiredParts.size) return;
+      let next = Infinity;
+      for (const part of state.desiredParts) {
+        if (module.__hkDataPartResident(part - 1)) continue;
+        const failure = state.failedParts.get(part);
+        const warmed = state.warmedParts.get(part);
+        next = Math.min(next, failure || (warmed && warmed.url === module.__hkDataPartUrl(part - 1)
+          ? warmed.time + WARM_TTL_MS : performance.now()));
+      }
+      if (!Number.isFinite(next)) return;
+      next = Math.max(next, state.lastDemandTime + ASSET_QUIET_MS, state.runtimeHoldUntil);
+      state.refreshTimer = setTimeout(() => {
+        state.refreshTimer = null;
+        warmNeighbors();
+      }, Math.max(1, next - performance.now()));
+    }
+
+    async function runWarmQueue() {
+      if (state.running) return;
+      state.running = true;
+      try {
+        while (!state.disposed && !state.suspended && state.queue.length &&
+               !state.demandDepth && performance.now() - state.lastDemandTime >= ASSET_QUIET_MS &&
+               performance.now() >= state.runtimeHoldUntil) {
+          const part = state.queue.shift();
+          if (module.__hkDataPartResident(part - 1)) continue;
+          const url = module.__hkDataPartUrl(part - 1);
+          const warmed = state.warmedParts.get(part);
+          if (warmed && warmed.url === url && performance.now() - warmed.time < WARM_TTL_MS) continue;
+          const request = new AbortController();
+          state.warmController = request;
+          state.activeWarmParts.add(part);
+          state.status = 'warming';
+          let transport;
+          try {
+            const expected = module.__hkTexturePartLength ? module.__hkTexturePartLength(part - 1) :
+              Math.min(partSize, map._meta.logicalArchiveSize - (part - 1) * partSize);
+            const result = await module.__hkWarmDataPart(part - 1, request.signal);
+            transport = result.transport;
+            if (!request.signal.aborted) {
+              state.warmedParts.set(part, { url: result.url, time: performance.now() });
+              state.warmBytes += expected;
+              state.failedParts.delete(part);
+            }
+          } catch (error) {
+            transport = error && error.detail && error.detail.transport;
+            if (!request.signal.aborted) {
+              state.warmFailures += 1;
+              state.failedParts.set(part, performance.now() + RETRY_COOLDOWN_MS);
+              reportError(error, { part, url, transport });
+            }
+          } finally {
+            if (transport) {
+              state.warmRequests += transport.attempts.length;
+              state.warmRetries += Math.max(0, transport.attempts.length - 1);
+              state.streamFallbacks += transport.streamFallbacks;
+            }
+            state.activeWarmParts.delete(part);
+            state.warmController = null;
+          }
+        }
+      } finally {
+        state.running = false;
+        state.status = state.disposed ? 'stopped' : state.suspended ? 'suspended' :
+          !state.currentScene ? 'waiting-for-scene' :
+          performance.now() < state.runtimeHoldUntil ? 'waiting-for-recovery' :
+          state.demandDepth || performance.now() - state.lastDemandTime < ASSET_QUIET_MS ? 'waiting-for-assets' :
+          [...state.desiredParts].some(part => state.failedParts.has(part)) ? 'retrying' : 'ready';
+        scheduleWarmPass();
+      }
+    }
+
+    function warmNeighbors() {
+      if (state.disposed || state.suspended) return;
+      if (state.refreshTimer !== null) clearTimeout(state.refreshTimer);
+      state.refreshTimer = null;
+      const parts = orderedNeighborParts(state.currentScene);
+      state.desiredParts = new Set(parts);
+      const now = performance.now();
+      state.queue = parts.filter(part => {
+        const warmed = state.warmedParts.get(part);
+        return !module.__hkDataPartResident(part - 1) &&
+          !state.activeWarmParts.has(part) && !(state.failedParts.get(part) > now) &&
+          (!warmed || warmed.url !== module.__hkDataPartUrl(part - 1) || now - warmed.time >= WARM_TTL_MS);
+      });
+      for (const part of state.activeWarmParts) {
+        if (!state.desiredParts.has(part) && state.warmController) state.warmController.abort();
+      }
+      // A single runner owns ALL requests, even while an aborted body settles.
+      // Replacing the queue cannot spawn a second worker.
+      if (state.queue.length && !state.demandDepth &&
+          now - state.lastDemandTime >= ASSET_QUIET_MS && now >= state.runtimeHoldUntil) {
+        runWarmQueue().catch(error => reportError(error, { phase: 'queue' }));
+      } else {
+        if (state.queue.length) state.status = now < state.runtimeHoldUntil ? 'waiting-for-recovery' : 'waiting-for-assets';
+        else if (!state.running) state.status = state.currentScene ?
+          ([...state.desiredParts].some(part => state.failedParts.get(part) > now) ? 'retrying' : 'ready') : 'waiting-for-scene';
+        scheduleWarmPass();
+      }
+    }
+
+    function assetReadActivity(active, partIndex) {
+      // Called only on a source-cache MISS; source-cache hits never cancel a
+      // useful request. Begin/end are paired by the filesystem in finally.
+      state.lastDemandTime = performance.now();
+      state.demandDepth += active ? 1 : -1;
+      if (active) {
+        state.demandStart = state.lastDemandTime;
+        state.demandMisses += 1;
+        state.demandedParts.add(partIndex + 1);
+        const warmed = state.warmedParts.get(partIndex + 1);
+        if (warmed && warmed.url === module.__hkDataPartUrl(partIndex)) state.preparedMisses += 1;
+      } else state.demandWaitMs += performance.now() - state.demandStart;
+      if (state.disposed) return;
+      if (active) {
+        if (!state.suspended) state.status = 'waiting-for-assets';
+        if (state.warmController && !state.warmController.signal.aborted) {
+          state.demandPauses += 1;
+          state.warmController.abort();
+        }
+      } else if (!state.demandDepth && state.refreshTimer === null && !state.running) {
+        scheduleWarmPass();
+      }
+    }
+
+    const previousPostMainLoop = module.postMainLoop;
+    function afterFrame() {
+      if (previousPostMainLoop) previousPostMainLoop.apply(this, arguments);
+      if (state.disposed || state.suspended || document.hidden ||
+          (module.__hkLifecycle && module.__hkLifecycle.state.paused)) {
+        state.lastFrameTime = null;
+        return;
+      }
+      const now = performance.now();
+      const bytes = module.HEAPU8 ? module.HEAPU8.byteLength : 0;
+      const gap = state.lastFrameTime === null ? 0 : now - state.lastFrameTime;
+      const grew = bytes > state.heapCapacityBytes;
+      state.heapCapacityBytes = bytes;
+      state.lastFrameTime = now;
+      if (grew) state.heapGrowthEvents += 1;
+      if (gap >= FRAME_GAP_MS) state.longFrameGaps += 1;
+      if (grew) {
+        state.lastRecoveryReason = 'wasm-heap-growth';
+        state.runtimeHoldUntil = now + RECOVERY_QUIET_MS;
+        if (state.warmController && !state.warmController.signal.aborted) {
+          state.recoveryPauses += 1;
+          state.warmController.abort();
+        }
+        if (state.desiredParts.size) state.status = 'waiting-for-recovery';
+        scheduleWarmPass();
+      }
+      // Scalar-only, 24 samples / at most one per five seconds. Never retain
+      // heap views, texture objects, payloads or an unbounded console log.
+      if (now - state.lastSampleTime >= 5000) {
+        state.lastSampleTime = now;
+        if (state.runtimeSamples.length === 24) state.runtimeSamples.shift();
+        state.runtimeSamples.push({ time: now, scene: state.currentScene,
+          wasmCapacityBytes: bytes, sourceCacheBytes: stats.cacheBytes,
+          newSourceBufferBytes: stats.newPartBufferBytes,
+          reusedSourceBuffers: stats.reusedPartBuffers,
+          syncReadMs: stats.syncBlockedMs });
+      }
+    }
+
+    function learnParts(parts) {
+      if (!state.currentScene || (state.currentSource !== 'level-block' && state.currentSource !== 'resource')) return;
+      let learned = state.learnedParts.get(state.currentScene);
+      if (!learned) { learned = new Set(); state.learnedParts.set(state.currentScene, learned); }
+      const direct = getSceneRecord(state.currentScene).directPreloadChunks || [];
+      for (const part of parts) {
+        if (learned.size >= MAX_LEARNED_PARTS) break;
+        if (!direct.includes(part)) learned.add(part);
+      }
+    }
+
+    function setCurrentScene(sceneName, source) {
+      if (!getSceneRecord(sceneName)) return false;
+      // Resource files and physical chunks can be SHARED DEPENDENCIES. They
+      // are hints, not scene-loaded events. Once a level block establishes a
+      // room, a weaker hint cannot replace it just because 1.8 seconds elapsed.
+      // For scenes with no exclusive level marker, retain the existing fallback.
+      if (sceneName !== state.currentScene && source !== 'level-block' &&
+          state.currentSource === 'level-block' && markerScenes.has(sceneName)) {
+        state.ignoredSceneHints += 1;
+        return false;
+      }
+      if (state.currentScene !== sceneName) state.lastDemandTime = performance.now();
+      const changed = state.currentScene !== sceneName;
+      state.currentScene = sceneName;
+      if (changed || source === 'level-block' || state.currentSource !== 'level-block') state.currentSource = source;
+      if (changed) {
+        state.candidateScene = ''; state.candidateHits = 0;
+        // Do not assign the previous room's read history to this room.
+        // Only subsequent, actually consumed data can become a learned extra.
+        if (state.sceneChanges.length === 16) state.sceneChanges.shift();
+        state.sceneChanges.push({ scene: sceneName, source, time: performance.now() });
+        state.demandedParts.clear();
+        state.recentDataReads.length = 0;
+        warmNeighbors();
+      }
+      return true;
+    }
+
+    function partsForDataRange(position, length) {
+      if (typeof module.__hkTexturePartsForRange === 'function') {
+        return module.__hkTexturePartsForRange(position, length);
+      }
+      if (!Number.isFinite(position) || !Number.isFinite(length) || length <= 0) return [];
+      const start = map._meta.dataUnity3dOuterOffset + position;
+      const end = start + length;
+      const first = Math.floor(start / partSize) + 1;
+      const last = Math.floor((end - 1) / partSize) + 1;
+      const parts = [];
+      for (let part = first; part <= last; part += 1) {
+        if (part >= 1 && part <= partCount) parts.push(part);
+      }
+      return parts;
+    }
+
+    function inferNeighborScene() {
+      const reads = state.recentDataReads;
+      if (!reads.length) return;
+      const current = getSceneRecord(state.currentScene);
+      const candidates = current && current.neighbors && current.neighbors.length
+        ? current.neighbors : [...sceneParts.keys()];
+      const currentParts = sceneParts.get(state.currentScene) || new Set();
+      const scored = [];
+      for (const name of candidates) {
+        if (name === state.currentScene) continue;
+        const target = sceneParts.get(name);
+        if (!target) continue;
+        const evidence = new Set(), support = new Set();
+        for (const read of reads) {
+          if (read.parts.some(part => target.has(part) && !currentParts.has(part))) {
+            // Count actual completed read ranges, not callbacks or timer ticks.
+            support.add(read.position + ':' + read.length);
+            for (const part of read.parts) if (target.has(part) && !currentParts.has(part)) evidence.add(part);
+          }
+        }
+        if (evidence.size) scored.push({ scene: name, evidence: evidence.size, support: support.size });
+      }
+      scored.sort((a, b) => b.evidence - a.evidence || b.support - a.support);
+      const best = scored[0], second = scored[1];
+      if (!best || (second && best.evidence === second.evidence && best.support === second.support)) {
+        state.candidateScene = ''; state.candidateHits = 0; return;
+      }
+      state.candidateScene = best.scene; state.candidateHits = best.support;
+      if (best.support >= 2 || best.evidence >= 2) setCurrentScene(best.scene, 'data-read');
+    }
+
+    function recordDataRead(position, length, started) {
+      const parts = partsForDataRange(position, length);
+      if (!parts.length) return;
+      const now = performance.now();
+      const previous = state.recentDataReads[state.recentDataReads.length - 1];
+      // A read blocked on network keeps its evidence. Gaps BETWEEN reads end a
+      // burst; wall-clock time while a read is blocked cannot erase that read.
+      if (previous && started - previous.time > recentReadWindowMs) state.recentDataReads.length = 0;
+      if (state.recentDataReads.length === MAX_RECENT_READS) state.recentDataReads.shift();
+      state.recentDataReads.push({ position, length, time: now, parts });
+      // Locate exclusive level-file compressed spans rather than guessing
+      // solely from 4 MiB chunk IDs (several rooms can share a physical chunk).
+      let low = 0, high = ranges.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (ranges[middle].end <= position) low = middle + 1; else high = middle;
+      }
+      let scene = '';
+      for (let index = low; index < ranges.length && ranges[index].start < position + length; index += 1) {
+        if (scene && scene !== ranges[index].scene) { scene = ''; break; }
+        scene = ranges[index].scene;
+      }
+      if (scene) setCurrentScene(scene, 'level-block');
+      // Bulk bundle reads are not a useful dependency observation.
+      if (parts.length <= MAX_LEARNED_PARTS) learnParts(parts);
+      if (state.candidateTimer === null && !state.suspended) {
+        // Throttle, not debounce: continuous reads cannot postpone this forever.
+        state.candidateTimer = setTimeout(() => {
+          state.candidateTimer = null;
+          inferNeighborScene();
+        }, 220);
+      }
+    }
+
+    function installLastFileHook() {
+      const descriptor = Object.getOwnPropertyDescriptor(stats, 'lastFile');
+      if (descriptor && descriptor.configurable === false) throw new Error('Preload resource hook is not configurable');
+      let currentValue = stats.lastFile || '';
+      const inspect = value => {
+        const scene = state.resourceToScene.get(String(value || '').split('/').pop());
+        if (scene) setCurrentScene(scene, 'resource');
+      };
+      Object.defineProperty(stats, 'lastFile', {
+        configurable: true, enumerable: true,
+        get() { return currentValue; },
+        set(value) {
+          currentValue = value;
+          try { inspect(value); } catch (error) { reportError(error, { phase: 'resource-detection' }); }
+        }
+      });
+      state.lastFileRestore = () => {
+        Object.defineProperty(stats, 'lastFile', descriptor && (descriptor.get || descriptor.set)
+          ? descriptor : Object.assign({ configurable: true, enumerable: true, writable: true }, descriptor, { value: currentValue }));
+      };
+      inspect(currentValue);
+    }
+
+    function installDataReadHook() {
+      const node = FS.lookupPath('data.unity3d').node;
+      const ops = node.stream_ops;
+      const originalRead = ops.read, originalMmap = ops.mmap;
+      if (typeof originalRead !== 'function') throw new Error('Bundle read operation is unavailable');
+      ops.read = function (stream, buffer, offset, length, position) {
+        const started = performance.now();
+        const count = originalRead.apply(this, arguments);
+        try { recordDataRead(position, count, started); }
+        catch (error) { reportError(error, { phase: 'read-detection' }); }
+        return count;
+      };
+      if (typeof originalMmap === 'function') {
+        ops.mmap = function (stream, buffer, address, length, position) {
+          const started = performance.now();
+          const result = originalMmap.apply(this, arguments);
+          try { recordDataRead(position, Math.max(0, Math.min(length, node.usedBytes - position)), started); }
+          catch (error) { reportError(error, { phase: 'mmap-detection' }); }
+          return result;
+        };
+      }
+      state.dataReadRestore = () => { ops.read = originalRead; if (originalMmap) ops.mmap = originalMmap; };
+    }
+
+    function suspend() {
+      state.lastFrameTime = null;
+      state.suspended = true; state.status = 'suspended'; state.queue.length = 0;
+      if (state.refreshTimer !== null) clearTimeout(state.refreshTimer);
+      if (state.candidateTimer !== null) clearTimeout(state.candidateTimer);
+      state.refreshTimer = state.candidateTimer = null;
+      if (state.warmController) state.warmController.abort();
+    }
+
+    function resume() {
+      if (state.disposed || document.hidden || !state.suspended ||
+          (module.__hkLifecycle && module.__hkLifecycle.state.paused)) return;
+      state.suspended = false;
+      state.lastFrameTime = null;
+      state.lastDemandTime = performance.now();
+      state.recentDataReads.length = 0;
+      state.candidateScene = ''; state.candidateHits = 0;
+      state.warmedParts.clear(); state.failedParts.clear();
+      warmNeighbors();
+    }
+
+    let timingObserver = null;
+    // Unlike "warmedParts", this records what subsequent game XHRs actually
+    // did. Cross-origin zero/zero timing is UNKNOWN, never a cache-hit claim.
+    const timingURLs = new Map(dataPartUrls.map((url, index) =>
+      [new URL(url, document.baseURI).href, index + 1]));
+    const observeHTTP = list => {
+      for (const entry of list.getEntries()) {
+        if (entry.initiatorType !== 'xmlhttprequest') continue;
+        let part = timingURLs.get(entry.name);
+        if (!part) {
+          for (let index = 0; index < partCount; index += 1) {
+            if (new URL(module.__hkDataPartUrl(index), document.baseURI).href === entry.name) {
+              part = index + 1; break;
+            }
+          }
+        }
+        if (!part) continue;
+        const warmed = state.warmedParts.get(part);
+        const prepared = Boolean(warmed &&
+          new URL(warmed.url, document.baseURI).href === entry.name && warmed.time <= entry.startTime);
+        const kind = entry.workerStart > 0 || !Number.isFinite(entry.transferSize) || !(entry.decodedBodySize > 0) ? 'unknown' :
+          entry.transferSize === 0 ? 'cached' : 'network';
+        const evidence = state.cacheEvidence;
+        evidence.observed += 1; evidence[kind] += 1;
+        if (prepared) evidence[kind === 'cached' ? 'warmedCached' :
+          kind === 'network' ? 'warmedNetwork' : 'warmedUnknown'] += 1;
+        evidence.transferBytes += entry.transferSize || 0;
+        if (state.recentHTTPReads.length === 32) state.recentHTTPReads.shift();
+        state.recentHTTPReads.push({ part, prepared, kind,
+          transferBytes: entry.transferSize || 0, decodedBytes: entry.decodedBodySize || 0,
+          durationMs: entry.duration, time: entry.startTime });
+      }
+    };
+
+    function report() {
+      if (timingObserver) observeHTTP({ getEntries: () => timingObserver.takeRecords() });
+      const resident = [], warmed = [], missing = [];
+      for (const part of state.desiredParts) {
+        if (module.__hkDataPartResident(part - 1)) resident.push(part);
+        else if (state.warmedParts.has(part) &&
+          state.warmedParts.get(part).url === module.__hkDataPartUrl(part - 1) &&
+          performance.now() - state.warmedParts.get(part).time < WARM_TTL_MS) warmed.push(part);
+        else missing.push(part);
+      }
+      return {
+        build: BUILD_VERSION, scene: state.currentScene, source: state.currentSource,
+        status: state.status, ignoredSceneHints: state.ignoredSceneHints,
+        desiredParts: [...state.desiredParts], residentParts: resident,
+        completedHTTPWarmParts: warmed, notPreparedParts: missing,
+        demandMisses: state.demandMisses, preparedMisses: state.preparedMisses,
+        sourceMissPartsSinceSceneSignal: [...state.demandedParts],
+        synchronousReadMs: state.demandWaitMs, timingStatus: state.timingStatus,
+        sourceCache: { bytes: stats.cacheBytes, limit: stats.cacheLimit,
+          hits: stats.cacheHits, misses: stats.cacheMisses,
+          newBuffers: stats.newPartBuffers, newBufferBytes: stats.newPartBufferBytes,
+          reusedBuffers: stats.reusedPartBuffers },
+        runtimeRecovery: {
+          wasmCapacityBytes: state.heapCapacityBytes,
+          capacityMeaning: 'Allocated WASM capacity, not live allocations or device RAM',
+          heapGrowthEvents: state.heapGrowthEvents, longFrameGaps: state.longFrameGaps,
+          preloadCancellations: state.recoveryPauses,
+          holdRemainingMs: Math.max(0, state.runtimeHoldUntil - performance.now()),
+          lastReason: state.lastRecoveryReason, samples: state.runtimeSamples.slice()
+        },
+        cacheEvidence: Object.assign({}, state.cacheEvidence),
+        recentHTTPReads: state.recentHTTPReads.slice(), sceneChanges: state.sceneChanges.slice(),
+        coverage: 'Mapped neighbors plus bounded observed extras; not complete dependency closure.'
+      };
+    }
+
+    const visibility = () => document.hidden ? suspend() : resume();
+    const online = () => { state.failedParts.clear(); warmNeighbors(); };
+    const controller = {
+      version: '1.5.0', build: BUILD_VERSION, state, suspend, resume, report,
+      cleanup() {
+        state.disposed = true; suspend(); state.status = 'stopped';
+        if (module.postMainLoop === afterFrame) {
+          if (previousPostMainLoop === undefined) delete module.postMainLoop;
+          else module.postMainLoop = previousPostMainLoop;
+        }
+        if (timingObserver) { timingObserver.disconnect(); timingObserver = null; }
+        timingURLs.clear();
+        if (module.__hkAssetReadActivity === assetReadActivity) delete module.__hkAssetReadActivity;
+        document.removeEventListener('visibilitychange', visibility);
+        window.removeEventListener('pagehide', suspend);
+        window.removeEventListener('pageshow', resume);
+        window.removeEventListener('online', online);
+        if (state.lastFileRestore) state.lastFileRestore();
+        if (state.dataReadRestore) state.dataReadRestore();
+        state.warmedParts.clear(); state.learnedParts.clear(); state.failedParts.clear();
+        if (window.__hkNeighborPreload === controller) delete window.__hkNeighborPreload;
+      }
+    };
+    try {
+      module.__hkAssetReadActivity = assetReadActivity;
+      module.postMainLoop = afterFrame;
+      installLastFileHook();
+      installDataReadHook();
+      if (typeof PerformanceObserver === 'function') {
+        try {
+          timingObserver = new PerformanceObserver(observeHTTP);
+          timingObserver.observe({ entryTypes: ['resource'] });
+          state.timingStatus = 'observing';
+        } catch (error) {
+          if (timingObserver) timingObserver.disconnect();
+          timingObserver = null;
+          state.timingStatus = 'unavailable: ' + String(error);
+        }
+      }
+      document.addEventListener('visibilitychange', visibility);
+      window.addEventListener('pagehide', suspend);
+      window.addEventListener('pageshow', resume);
+      window.addEventListener('online', online);
+    } catch (error) {
+      controller.cleanup();
+      throw error;
+    }
+    window.__hkNeighborPreload = controller;
+    state.status = state.suspended ? 'suspended' : state.running ? 'warming' :
+      state.queue.length ? 'waiting-for-assets' : state.currentScene ? 'ready' : 'waiting-for-scene';
+    return controller;
+  };
+})();
